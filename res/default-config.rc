@@ -1,0 +1,6 @@
+// The embedded default settings (res/cabbycodes.toml). D2RLoader writes them to
+// <scope>/d2rloader/config/cabbycodes.toml the first time the plugin loads and
+// never overwrites a user's copy.
+#include <D2RLPlugin/resource.h>
+
+D2RL_PLUGIN_CONFIG_RESOURCE_ID RCDATA "cabbycodes.toml"

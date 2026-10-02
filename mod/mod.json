@@ -1,0 +1,7 @@
+{
+  "name": "D2RCabbyCodes",
+  "description": "Cabby Codes: an in-game cheat panel for offline play (pause the game or press F7). God mode, infinite mana, experience and damage multipliers, movement speed, exit-before-death, invincible mercenary and minions, cannot be frozen or poisoned, infinite town portal, identify, potions and keys, no durability loss, respec and skill/attribute presets, map reveal, item levels after item names, health bars for monsters and act bosses, loot (drops limited to your loot filter, extra drops, perfect rolls, all superior and all ethereal), and the automap and Show Items kept the way you left them between games. Runtime plugin for D2RLoader: install it with D2RMM for D2RLoader (Plugins tab), or copy the d2rloader folder into your mod. Every option is in the in-game panel: the mod has no D2RMM settings and changes no game data.",
+  "author": "SirCabby",
+  "website": "https://github.com/SirCabby/D2RCabbyCodes",
+  "version": "@VERSION@"
+}

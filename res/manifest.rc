@@ -1,0 +1,6 @@
+// The D2RLoader plugin manifest: the plugin ABI this DLL was built against,
+// stored as RCDATA under the SDK's resource id. D2RLoader refuses a DLL without it.
+#include <D2RLPlugin/resource.h>
+#include <D2RLPlugin/version.h>
+
+D2RL_PLUGIN_MANIFEST_RESOURCE_ID RCDATA { D2RL_PLUGIN_RESOURCE_DWORD(D2RL_PLUGIN_ABI_VERSION) }

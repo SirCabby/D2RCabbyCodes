@@ -1,0 +1,18 @@
+# Copy this file to config.mk and set your local paths.
+#   cp config.mk.example config.mk
+# config.mk is gitignored, so your personal values never enter the repo.
+
+# Absolute path to your Diablo II: Resurrected folder - the directory containing
+# "D2R.exe" (and, once installed, "D2RLoader.exe"). Spaces are fine; do not quote.
+# Windows example:      GAME_DIR := C:/Program Files (x86)/Diablo II Resurrected
+# Linux/Proton example: GAME_DIR := /home/you/Games/battlenet/drive_c/Program Files (x86)/Diablo II Resurrected
+GAME_DIR := /path/to/Diablo II Resurrected
+
+# The mod folder the game is launched with (-mod <name>): `make install-mod`
+# puts the plugin inside it (mods/<MOD_NAME>/d2rloader/plugins). D2RMM's output
+# mod is called D2RMM unless you renamed it in D2RMM's settings.
+MOD_NAME := D2RMM
+
+# D2RMM's own mods folder (the one with "PUT YOUR MODS HERE"): `make install-d2rmm`
+# copies the packaged mod folder there so D2RMM lists it.
+D2RMM_MODS_DIR := /path/to/D2RMM/mods

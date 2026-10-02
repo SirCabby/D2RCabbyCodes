@@ -1,0 +1,37 @@
+# ---- Build output ----
+build/
+dist/
+tests/build/
+
+# ---- IDEs / editors ----
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+compile_flags.txt
+
+# ---- Local build config (your machine's GAME_DIR) ----
+config.mk
+
+# ---- Python tooling ----
+__pycache__/
+*.py[cod]
+
+# ---- OS junk ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Misc ----
+*.log
+
+# ---- never commit game data, saves or reverse-engineering dumps ----
+*.d2s
+*.d2i
+*.d2x
+*.dumped.exe
+*.fixed.exe
+*.decrypted.exe
+ghidra_proj/
+.save-backup-*/

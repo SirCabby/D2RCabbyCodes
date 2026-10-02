@@ -1,0 +1,209 @@
+# CabbyCodes for Diablo II: Resurrected - settings.
+#
+# Change these in the game: pause (Esc) and use the CabbyCodes panel, or press
+# F7. The panel writes this file; you can also edit it here while the game is
+# closed. Everything applies to offline single-player games only.
+
+[cabbycodes]
+# Master switch. false loads the plugin with every cheat off and no hook installed.
+enabled = true
+
+# Cheats at start-up (the panel changes them while you play).
+god_mode = false
+infinite_mana = false
+infinite_stamina = false
+
+# Experience gained is multiplied by this (1.0 = normal). 1.0 to 50.0.
+exp_multiplier = 1.0
+
+# The damage your hits do - yours, your summons' and your mercenary's - is
+# multiplied by this (1.0 = normal), poison and burning included. 1.0 to 100.0.
+damage_multiplier = 1.0
+
+# Extra movement speed, in percent (0 = normal). 0 to 300.
+move_speed_bonus = 0
+
+# Your mercenary, and your summons, take nothing from any hit.
+invincible_mercenary = false
+invincible_minions = false
+# Your mercenary, and your summons, fight nothing: they follow you as always
+# but never pick a fight, and do not hit back when hit (the two above keep
+# them alive). Their auras still work. Traps and hydras do nothing then.
+passive_mercenary = false
+passive_minions = false
+# Hits never freeze or chill you (cold damage itself still hurts), and never
+# poison you (a poison already on you ends at once).
+cannot_be_frozen = false
+cannot_be_poisoned = false
+# Curse immunity: a monster's curse never lands on you (Amplify Damage,
+# Decrepify, Weaken, Lower Resist, Defense Curse, Blood Mana and the rest, a
+# Cursed unique monster's too), and a curse already on you ends at once.
+# Shrines work as always.
+cannot_be_cursed = false
+
+# Consumables that are not used up: town portal and identify scrolls stay
+# where they are and their tomes keep every charge; a potion you drink stays
+# in its belt slot or inventory cell; a key in your inventory opens every
+# locked chest and door and is never spent.
+infinite_town_portal = false
+infinite_identify = false
+infinite_potions = false
+infinite_keys = false
+
+# An item you pick up is identified at once, as if you had read a Scroll of
+# Identify on it: into your inventory, belt or Horadric Cube, onto the cursor,
+# or with Telekinesis. A unique or set item goes into your Chronicle then, as
+# identifying it puts it there. Items you already carry stay as they are.
+auto_identify = false
+
+# Your weapon and armor never lose durability: not from your hits, the hits
+# you take or Impale (ethereal items included). An item already broken stays
+# broken until it is repaired.
+no_durability_loss = false
+
+# Nothing you pay for takes your gold: buying, gambling, repairs, Deckard
+# Cain's identifying, hiring a mercenary and bringing one back to life. You
+# still need to hold the price (inventory or stash): it is just not taken.
+infinite_gold = false
+
+# The three services a quest gives once, whenever you ask and as often as you
+# like, the quest done or not: Charsi imbues (a plain item made rare), Larzuk
+# adds sockets, Anya personalizes. The quest's own reward is neither needed
+# nor used up. What an item gets, and which items can have it, is the game's.
+infinite_imbue = false
+infinite_sockets = false
+infinite_personalize = false
+
+# A Horadric Cube recipe uses nothing up: its ingredients come back to your
+# inventory beside what it made (at your feet when there is no room), and
+# Clear Sockets gives back what was in the sockets too. An item a recipe
+# changes in place (an upgrade, added sockets, a repair) is what it makes,
+# not a copy. Portal recipes keep their keys, organs and Wirt's Leg.
+infinite_cube_ingredients = false
+
+# Your home town. 0: none (the game's own: a town portal leads to the town of
+# the act it is read in, and a death wakes you in the town of the act you died
+# in). 1 to 5: that act's town, whatever act you are in: your town portals lead
+# there (the portal in that town leads back to where it was read), and you wake
+# there after a death. Only a town the character has the waypoint of, else the
+# game's own.
+home_town = 0
+
+# Leave the game instead of dying: a hit that would kill you is stopped at
+# 1 life and the game saves and exits, so the death is never recorded.
+exit_before_death = false
+# Also leave when life falls below this percent (0 = only on a lethal hit).
+exit_below_life_percent = 0
+# "save_and_exit" (the game's own Save and Exit), or "force_close" (ends the
+# process at once; progress since the last save is lost).
+exit_method = "save_and_exit"
+
+# Every act terrorized in every game, as if each act's Worldstone Shard had
+# been used, and the Moo Moo Farm too: every area a terror zone can take, for
+# the whole game (the half-hour rotation does not end it). New areas you enter
+# generate terrorized; areas already visited keep their monsters as they were.
+# Needs a game with terror zones (Baal killed on that difficulty, the game's
+# Terror Zones option on).
+terror_all_areas = false
+
+# Show each area's monster level (for the current difficulty) after its name:
+# in the automap's area text, and in the waypoint list.
+area_level_automap = false
+area_level_waypoints = false
+
+# Reveal the whole map of the area you are in on the automap, and of every
+# area you enter after it.
+reveal_map = false
+
+# An item's level after its name, as in "Grand Charm (91)": weapons, armor,
+# rings, amulets, charms and jewels (not quest items or throwing potions).
+item_level = false
+
+# A short life bar above every enemy on screen (HD graphics).
+monster_health_bars = false
+# An act boss's name and life at the top centre of the screen while it is near.
+boss_health_bar = false
+# Where the boss bar sits: its top, in percent of the screen height (0 to 50).
+boss_bar_position = 0
+
+# Loot. Monsters and chests (and barrels, urns, bodies, racks) drop only what
+# your loot filter shows (the game's own filter, the character's profile), and
+# every pick drops; a pick is left empty only when nothing the filter shows
+# turns up.
+loot_filter_only = false
+# ... only the unique and set items your Chronicle does not have yet (a set
+# item once a game). With loot_filter_only too, a drop may be either: what the
+# filter shows, or an item the Chronicle misses.
+chronicle_only = false
+# More items from the same treasure class for every kill or chest (0 to 20).
+extra_drops = 0
+# The extra drops come only with the kills that tend to drop better: champions,
+# unique and super unique monsters, bosses and a terror zone's Heralds.
+# Ordinary monsters, a unique's or a Herald's minions and chests get none.
+extra_drops_elites_only = false
+# The six switches below are for new items. They act while the game makes an
+# item, in its own generator, and leave every item one the game itself can
+# make. A save keeps one seed with an item, the one that rolled its durability,
+# an armor's base defense and its picture: under perfect_rolls an armor is made
+# from a seed that rolls its top defense, so the seed in the save agrees with
+# the item. Nothing is looked up while you play.
+#
+# Every new item's stats at the top of their ranges (drops, vendors, gambling,
+# crafting, runewords, cube), armor at its highest base defense, and class
+# items (the ones only one class can use) with three "+skill" lines, each at
+# +3. Which skill, class or stat a random property picks stays random.
+perfect_rolls = false
+# Every new normal or inferior item that can be superior is.
+all_superior = false
+# Every new item the game allows to be ethereal is (vendor stock, gambling and
+# quest items never are). Ethereal items cannot be repaired.
+all_ethereal = false
+# Every new normal or superior item whose base can have sockets (weapons, body
+# armor, helms, shields) has them. How many is still random, up to what the
+# base allows at the item's level (at most 3 in Normal and 4 in Nightmare).
+all_socketed = false
+# Every new magic, rare and crafted item gets as many affixes as the game lets
+# its quality have: a magic item a prefix and a suffix, a rare item six (a rare
+# jewel four), a crafted item four random ones. Which affixes is still the
+# game's pick, from what the item can have at its level.
+max_affixes = false
+# Every affix a new magic, rare or crafted item gets is the best version of
+# that affix the item could have at its level: the same stats, the biggest
+# numbers (life "of the Whale" rather than "of the Jackal" once the item's
+# level allows the Whale). Which affixes, and how many, is still the game's
+# roll; max_affixes adds more.
+best_affixes = false
+
+# Kept between games: when you load a character (any character), the automap
+# is open or closed, and Show Items and Show Items (Unfiltered) are on or off,
+# the way they were when you last left a game. The two Show Items ones work
+# only while the game's Item Name Display option (and Unfiltered Item Name
+# Display) is set to Toggle.
+remember_automap = false
+remember_show_items = false
+remember_show_items_unfiltered = false
+# What they remember (the plugin writes these as you play).
+automap_was_open = false
+show_items_was_on = false
+show_items_unfiltered_was_on = false
+
+# Show the panel whenever the game's Esc menu is open.
+show_on_pause = true
+# Key that hides/shows the panel (a virtual-key name or hex code; F7 = 0x76).
+toggle_key = "F7"
+
+# The plugin's log (d2rloader/logs/cabbycodes.log): what it found and hooked
+# as the game started, and what it does as you play. Off as installed: while it
+# is false nothing is written but what you ask for by name in the loader's
+# console (cabbycodes perf, cabbycodes dropcheck). true writes it, which is what
+# to send along when something does not work. The panel's Diagnostics section
+# switches it while you play.
+logging = false
+# The least severe kind of line the log takes; the more severe kinds are
+# written too. "info": everything. "warning": warnings and errors. "error":
+# errors only.
+log_level = "info"
+# Verbose diagnostics in the D2RLoader log, each line written the instant it is
+# made. The log is then complete up to the moment of a crash, but the game
+# waits some 5 ms for every line: leave it off unless a problem is looked for.
+trace = false
