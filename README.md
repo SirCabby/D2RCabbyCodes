@@ -83,40 +83,59 @@ be used online anyway.
 ## Requirements
 
 - Diablo II: Resurrected 3.3 (build 93847, the Battle.net client; the Steam build has the same code and should work, but is untested).
-- [D2RLoader](https://d2rloader.net) 1.3.1 or newer installed in the game folder. CabbyCodes is a D2RLoader
-  plugin: the loader injects it, tracks its hooks, and lets it coexist with every other plugin (MapSense, Floating
-  Damage, PlayerX Scaling, ...).
-- Optional: [D2RMM for D2RLoader](https://www.nexusmods.com/diablo2resurrected/mods/1184), the D2RMM fork that
-  installs the loader and its plugins for you.
+- [D2RLoader](https://d2rloader.net) 1.3.1 or newer. CabbyCodes is code that runs inside the game, and only the
+  loader can put it there: D2RMM installs game data and cannot load a plugin, whichever folder it is given.
+  Setting the loader up is a one-time step below; you keep installing your other mods with D2RMM as before.
+- The Microsoft Visual C++ x64 runtime, 2019 (16.10) or newer - D2RLoader needs it. If D2RLoader shows an error
+  about VCRUNTIME or MSVCP before the game opens, install
+  [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) from Microsoft.
 
 ## Install
 
-### With D2RMM for D2RLoader (recommended)
+One-time setup: put D2RLoader and the plugin into the game folder, then start the game through D2RLoader instead
+of D2RMM's Run button. D2RMM stays your mod manager; only the launch changes.
 
-1. Drop `D2RCabbyCodes_vX.Y.Z.zip` into D2RMM's `mods` folder, or install it through the Nexus button.
-2. Enable D2RCabbyCodes in the mod list. It has no D2RMM settings: everything lives in the in-game panel.
-3. Install Mods. The plugin lands in `<game>\mods\<your mod>\d2rloader\plugins\` and its settings file
-   in `...\d2rloader\config\cabbycodes.toml` (also editable from D2RMM's Plugins tab).
-4. Run Game. D2RMM for D2RLoader starts the game through `D2RLoader.exe`.
+1. **D2RLoader**: download the latest from [d2rloader.net](https://d2rloader.net) and unzip everything in it into
+   the game folder - the one that holds `D2R.exe`, usually
+   `C:\Program Files (x86)\Diablo II Resurrected`. `D2RLoader.exe` now sits next to `D2R.exe`.
+2. **CabbyCodes**: open `D2RCabbyCodes_vX.Y.Z.zip` and drag the `d2rloader` folder inside it (it is in the
+   `D2RCabbyCodes` folder) into the same game folder, so it merges with the loader's. You end up with
+   `<game>\d2rloader\plugins\d2rl-cabbycodes.dll`.
+   The same zip is the D2RMM mod folder: dropped into D2RMM's `mods` folder it is listed there, but the entry
+   changes no game data, so enabling it and Install Mods do nothing by themselves.
+3. **Launch**: make a desktop shortcut to `D2RLoader.exe` (right-click it, Send to, Desktop; on Windows 11 that
+   is under Show more options). If you play with D2RMM mods, open the shortcut's Properties and add the Run
+   button's arguments to the end of Target - hover D2RMM's Run button to see them, usually ` -mod D2RMM -txt`:
 
-The stock D2RMM lists the mod too, but knows nothing about plugins; install the plugin by hand with it.
+       "C:\Program Files (x86)\Diablo II Resurrected\D2RLoader.exe" -mod D2RMM -txt
 
-### By hand
+   Install Mods in D2RMM as before, then start the game from this shortcut. D2RMM's own Run button starts the
+   plain game, which skips the loader: your mods still load, but the panel will not be there.
 
-1. Unzip `d2rl-cabbycodes_vX.Y.Z.zip`. It contains one folder, `d2rloader`.
-2. Copy that folder either into the game folder (`<game>\d2rloader\` - loads for every mod and for no mod), or into
-   the mod you play (`<game>\mods\<mod>\d2rloader\` - loads with that mod only). Not both.
-3. Start the game through `D2RLoader.exe`.
+Then load a character and press Esc (or F7): the Cabby Codes panel is there. If it is not:
 
-To remove it, delete `d2rloader\plugins\d2rl-cabbycodes.dll`. The settings file can stay.
+- No `<game>\d2rloader\logs\d2rloader.log`, or one older than your launch: the game was not started through
+  D2RLoader - use the shortcut.
+- The log has no `CabbyCodes ... by SirCabby` line: the DLL is not in `<game>\d2rloader\plugins\`.
+- D2RLoader shows an error before the game opens: see the Visual C++ runtime under Requirements.
+
+**Updating**: replace `<game>\d2rloader\plugins\d2rl-cabbycodes.dll` with the new one. Your settings live in
+`<game>\d2rloader\config\cabbycodes.toml` and stay. After a game patch, D2RLoader itself may need an update
+before the game starts.
+
+**Removing**: delete `d2rl-cabbycodes.dll`. To stop using the loader too, start the game from D2RMM or
+Battle.net again; the loader's files sit idle until then.
+
+**D2RMM for D2RLoader**: the [fork](https://www.nexusmods.com/diablo2resurrected/mods/1184) of D2RMM with the
+loader built in can stand in for the shortcut - its Run Game starts `D2RLoader.exe`, it can download the loader
+for you, and its Plugins tab imports `D2RCabbyCodes_vX.Y.Z.zip` directly. The game-folder install above works
+the same under it.
 
 ### Linux (Proton)
 
-D2RLoader runs fine under Proton. Launch `D2RLoader.exe` in the game's prefix with the same runner as the game
-(`scripts/d2r-loader.sh` does this with umu-run; adapt the paths). Use Proton's `run` verb rather than
-`waitforexitandrun` when Battle.net is open in the same prefix, or the launch waits forever for it to close.
-The native Linux D2RMM's Run Game button can be pointed at such a script (`tools/run-game` in its folder, see
-the script for the argument shape).
+The same files, inside the game's prefix. Start `D2RLoader.exe` with the same runner as the game and the same
+arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), with Proton's `run` verb rather than
+`waitforexitandrun` - that one waits forever while Battle.net is open in the same prefix.
 
 ## Using it
 
@@ -532,7 +551,7 @@ make                              # developer build -> build/dev/d2rl-cabbycodes
 make install                      # copy it into <game>/d2rloader/plugins/
 make test                         # host-side unit tests (run under wine)
 make dist                         # release build -> dist/D2RCabbyCodes/ (the D2RMM mod folder)
-make package                      # the two zips
+make package                      # the release zip, dist/D2RCabbyCodes_vX.Y.Z.zip
 ```
 
 Vendored: Dear ImGui (MIT), MinHook (BSD-2, only for the DXGI Present hooks the overlay needs), the D2RLoader

@@ -209,14 +209,14 @@ uninstall:
 
 # --- Distributable ----------------------------------------------------------
 # `make dist` assembles dist/D2RCabbyCodes/: a D2RMM mod folder (mod.json,
-# mod.js) that carries the D2RLoader plugin in its d2rloader/ subfolder, the way
-# D2RMM for D2RLoader expects. It is always the release build (DEV=0).
-# `make package` zips it (the D2RMM mod) and, for people who install plugins by
-# hand, the d2rloader/ folder alone.
+# mod.js) that carries the D2RLoader plugin in its d2rloader/ subfolder. It is
+# always the release build (DEV=0). `make package` zips it into the one release
+# zip, D2RCabbyCodes_vX.Y.Z.zip: dropped into D2RMM's mods folder it is the
+# listed mod, and the d2rloader/ folder inside it is what goes into the game
+# folder.
 DIST      ?= dist
 PAYLOAD    = $(DIST)/$(PROJECT)
 PKG        ?= $(DIST)/$(PROJECT)_v$(VERSION).zip
-PLUGIN_PKG ?= $(DIST)/$(NAME)_v$(VERSION).zip
 RELEASE_DLL := build/release/$(NAME).dll
 
 dist:
@@ -244,10 +244,9 @@ install-d2rmm: dist
 
 package: dist
 	@command -v zip >/dev/null || { echo "ERROR: zip required"; exit 1; }
-	@rm -f "$(PKG)" "$(PLUGIN_PKG)"
+	@rm -f "$(PKG)"
 	@cd "$(DIST)" && zip -r -q "$(abspath $(PKG))" "$(PROJECT)"
-	@cd "$(PAYLOAD)" && zip -r -q "$(abspath $(PLUGIN_PKG))" d2rloader
-	@echo ">> packaged -> $(PKG) ($$(du -h "$(PKG)" | cut -f1)) and $(PLUGIN_PKG)"
+	@echo ">> packaged -> $(PKG) ($$(du -h "$(PKG)" | cut -f1))"
 
 # --- The item seed model (research) -------------------------------------------
 # tools/seedmodel/ follows the game's item generator roll by roll: what an item's

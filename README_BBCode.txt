@@ -44,16 +44,22 @@ The panel is runtime only: no game file is modified. Settings change from the pa
 [size=4][b]Requirements[/b][/size]
 [list]
 [*]Diablo II: Resurrected 3.3 (build 93847).
-[*][url=https://d2rloader.net]D2RLoader[/url] 1.3.1 or newer in the game folder. CabbyCodes is a D2RLoader plugin and coexists with the other plugins.
-[*]Optional: [url=https://www.nexusmods.com/diablo2resurrected/mods/1184]D2RMM for D2RLoader[/url].
+[*][url=https://d2rloader.net]D2RLoader[/url] 1.3.1 or newer. CabbyCodes is code that runs inside the game, and only the loader can put it there: D2RMM installs game data and cannot load a plugin. Setting the loader up is a one-time step; you keep installing your other mods with D2RMM as before.
+[*]The Microsoft Visual C++ x64 runtime, 2019 (16.10) or newer ([url=https://aka.ms/vs/17/release/vc_redist.x64.exe]vc_redist.x64.exe[/url]) - D2RLoader needs it.
 [/list]
 
 [size=4][b]Install[/b][/size]
-[b]With D2RMM for D2RLoader:[/b] drop the mod zip into its mods folder (or use the Nexus button), enable it, Install Mods, Run Game. The plugin lands in your mod's d2rloader\plugins folder; its settings file is editable from the Plugins tab.
+One-time setup: put D2RLoader and the plugin into the game folder, then start the game through D2RLoader instead of D2RMM's Run button. D2RMM stays your mod manager; only the launch changes.
 
-[b]By hand:[/b] unzip d2rl-cabbycodes_vX.Y.Z.zip and copy its d2rloader folder into the game folder (loads for everything) or into the mod you play under mods\<mod>\ (that mod only). Start the game through D2RLoader.exe. To remove: delete d2rloader\plugins\d2rl-cabbycodes.dll.
+[b]1. D2RLoader:[/b] download the latest from [url=https://d2rloader.net]d2rloader.net[/url] and unzip everything in it into the game folder - the one that holds D2R.exe, usually C:\Program Files (x86)\Diablo II Resurrected. D2RLoader.exe now sits next to D2R.exe.
+[b]2. CabbyCodes:[/b] open D2RCabbyCodes_vX.Y.Z.zip and drag the d2rloader folder inside it (in the D2RCabbyCodes folder) into the same game folder, so it merges with the loader's. You end up with <game>\d2rloader\plugins\d2rl-cabbycodes.dll. The same zip is the D2RMM mod folder: dropped into D2RMM's mods folder it is listed there, but the entry changes no game data, so enabling it and Install Mods do nothing by themselves.
+[b]3. Launch:[/b] make a desktop shortcut to D2RLoader.exe. If you play with D2RMM mods, open the shortcut's Properties and add the Run button's arguments to the end of Target - hover D2RMM's Run button to see them, usually -mod D2RMM -txt. Install Mods in D2RMM as before, then start the game from this shortcut. D2RMM's own Run button starts the plain game, which skips the loader: your mods still load, but the panel will not be there.
 
-The stock D2RMM lists the mod, but does not install plugins; install the plugin by hand with it.
+Then load a character and press Esc (or F7): the panel is there. If it is not: no <game>\d2rloader\logs\d2rloader.log (or one older than your launch) means the game was not started through D2RLoader - use the shortcut; no "CabbyCodes" line in that log means the DLL is not in d2rloader\plugins; an error before the game opens usually means the Visual C++ runtime above is missing.
+
+To update, replace d2rl-cabbycodes.dll - your settings stay in d2rloader\config\cabbycodes.toml. To remove, delete it.
+
+[url=https://www.nexusmods.com/diablo2resurrected/mods/1184]D2RMM for D2RLoader[/url], the fork of D2RMM with the loader built in, can stand in for the shortcut: its Run Game starts D2RLoader.exe, it can download the loader for you, and its Plugins tab imports D2RCabbyCodes_vX.Y.Z.zip directly.
 
 [size=4][b]Using it[/b][/size]
 F7 shows and hides the panel; with "Show on pause" on it also appears with the Esc menu. Collapsible sections: Cheats (god mode, infinite mana and stamina, speed, experience and damage multipliers, invincible and passive mercenary and minions, cannot be frozen, poisoned or cursed, infinite town portal, identify, potions and keys, no durability loss, infinite gold, infinite imbues, sockets and personalizing, infinite cube ingredients, all areas terrorized, exit before death), Character (respec, presets), Loot (loot filter drops, extra drops, perfect rolls, all superior, all ethereal, all socketed, max affixes, best affixes), Display (map reveal, area levels, item level, health bars), Quality of life (the automap and Show Items kept between games, your home town), Diagnostics (the log switched on or off, and how severe a line must be to be written). Settings are saved to d2rloader\config\cabbycodes.toml the moment you change them, presets to cabbycodes.presets.txt beside it. The loader console has a "cabbycodes" command (status, god|mana|exit|bars|bossbar|map|loot|perfect|superior|eth|sockets|affixes|best|merc|minions|passivemerc|passiveminions|unfreezable|unpoisonable|uncursable|tp|id|potions|keys|gold|imbue|addsockets|personalize|cube|durability|tz|ilvl|keepmap|keepitems|keepunfiltered|log on|off, loglevel info|warning|error, exp <x>, dmg <x>, speed <pct>, home <0..5>, drops <n>, elites on|off, respec, preset save|load <name>, save, dropcheck).
