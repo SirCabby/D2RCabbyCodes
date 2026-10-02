@@ -87,7 +87,11 @@ loader is the injection point every runtime mod uses).
   monster's AI tick; for a pet of the local player's whose switch is on it marks the thread for the length of the
   tick), the enemy test (every way an AI finds a target asks it; answered "not an enemy" while the mark is up) and the
   getter of the kind of target kept on a monster (answered none while the mark is up). Nothing is called but the
-  originals, nothing written.
+  originals, nothing written. Approved 2026-10-02 for permanent revives (asked as "add a cheat so that necromancer
+  revived minions don't time out and stay until death"; Joshua chose the timer dropped, and Revives only): one hook,
+  on the server thread, the killself monster mod's timer (the end of a revive's time; a Decoy's and a Reanimate As
+  monster's too), whose original is not run for a revive of the local player's under the switch; inside it one routine
+  of the game's called, the pet lookup the original's pet removal asks first (read only). Nothing written.
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -133,8 +137,12 @@ src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, 
                       portal's cast, town end and use, a death's wake, the client's portal trip, the client's NPC
                       menu, the cube's product routine, the item free and the socket contents' free, the protected-
                       stat test (god mode), the item notice (identify on pickup), the AI dispatcher, the enemy test
-                      and the kept target's getter (passive pets); the item writer patch, the rare step's picker calls
+                      and the kept target's getter (passive pets), the killself timer (permanent revives); the item
+                      writer patch, the rare step's picker calls
 src/cheats.*          switches (atomics), Status snapshot, why-not reasons for the panel
+src/movespeed.h       movement speed: the bonus in the player's base velocitypercent, put on top of the game's own
+                      again wherever the base is not what the tick wrote (each game's character starts at 100, with
+                      the same id; the rule, tests/test_movespeed.cpp)
 src/terror.*          all areas terrorized: every act's manual zone (and the Moo Moo Farm's) applied as a Worldstone
                       Shard applies it, from the tick; switched off, the manual terror taken off
 src/arealevel.*       Levels table (loader data-table service) + localized names (loader localization service) for area levels
@@ -188,6 +196,10 @@ src/passive.*         passive mercenary and minions: the thread marked for the l
                       hook on the AI dispatcher, server thread), and while it is, no unit is an enemy (the enemy test's
                       hook) and no target is kept on the monster (the kept target getter's); which pets, and the
                       mark, are in the header (tests/test_passive.cpp)
+src/revive.*          permanent revives: the killself monster mod's timer not run for a revive of the local player's
+                      (the hook on the timer, server thread), which pets by the game's own pet lookup; Revive's pet
+                      type read from its Skills row (game thread, the tick); the rule is in the header
+                      (tests/test_revive.cpp)
 src/itemlevel.*       item level after an item's name: Items and ItemTypes rows classified per bank (game thread),
                       the level added by the item-name hook (UI thread)
 src/mapreveal.*       map reveal: the current area's rooms built and revealed on the automap (UI thread, no hook;
@@ -299,6 +311,7 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | damage effects | 0x4509B0 / 0x451570 / 0x4518C0 / 0x451380 / 0x451C30 / 0x451820 | chill (state 11) / freeze (state 1) / poison (state 2, hpregen stat) / burning (state 115) / stun (state 21) / absorb heal; all called from ExecuteEvents only |
 | SUNITDMG_FinalizeDamage | 0x44A9B0 | (game, attacker, defender, D2Damage*): the kill decision |
 | D2GAME_PLAYER_ApplyStatRegen | 0x42E600 | (game, unit, a3, a4): every server frame per player (~25/s) |
+| a character's stats for a game | 0x52D770 / 0x420280 / 0x5311F0 | the base stats a character's new unit gets as a game takes it in: a new character's from its CharStats row (0x52D770: attributes, life, mana, stamina, level 1), a character read from its save (0x420280, the quests' "Woo!" header checked; life and mana), and 0x5311F0 on the load D2RCore runs (0x52E910, named only in D2RCore's routine table; gold capped, stamina full, the skills' hot keys). Each sets base stats 68 attackrate, 67 velocitypercent and 69 other_animrate to 100. No other routine of the game's writes a player's 67 (its writers: those three, the monsters' init 0x495500, a hireling's 0x543E90 (75), the debug routine 0x402BB0 on its own unit, and the client's 0xFED70, 0x1A33B0, 0x1A3940, 0x1A4150). Read: movement speed |
 | D2GAME_PLAYER_DeathPenalties | 0x424AC0 | (game, player, killer) -> u64: gold and experience loss |
 | PLAYER_AddExperience | 0x44F2E0 | (game, player, currentLevel, amount): caps at the level-99 total (unsigned), sets stats 29/13, levels up via 0x52DA30 + event 0xC; callers in 0x44A3B0..0x44A823 (kill exp; amount from 0x44ECE0, capped 0x7FFFFF) |
 | D2Common_SKILLMANA_GetManaCost | 0x33AA00 | (u8 dataCtx, skillId, level) -> cost in 256ths: `(mana + lvlmana*(lvl-1)) << manashift`, min `minmana<<8`. No unit argument |
@@ -487,6 +500,12 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | AI unit search | 0x596340 / 0x1D3F910 | (game, unit, &result, filter, mode on the stack, 1..10): the units of the rooms near the unit, each put to a filter: the mode's own (table 0x1D3F910, 16 bytes {how the rooms are walked, filter}), or the one given (modes 1, 2). 3 0x597D60 (no enemy by the enemy test: an ally; only Baal's throne asks), 4 0x597E00 (an enemy by 0x597840; no town rooms), 5 0x597BB0 / 6 0x597CD0 (an enemy by 0x597710), 7 objects (doors), 8 the unit's own dead minions (0x5979A0), 9 0x5978B0 (an enemy by 0x597840), 10 a class counted. Own filters: the Warlock demons' 0x5D4F30, the Shadow Master's 0x5D1360, the Overseer's 0x5C2700 (whose minions are the ones no enemy), ... Read: passive pets |
 | AI target finders | 0x595750 / 0x595F80 / 0x598010 | 0x595750 (game, unit, AI record, &distance, &in melee range, difficulty) -> the target: the kept target first (0x598010), then for a unit on the monsters' side the players near (game +0x21E0), for any other the searches of modes 4 and 6; the dispatcher's for mode 2, and the pet AIs' with the pet or its owner. 0x595F80 (game, unit, &distance, &in range): the kept target, then modes 5 and 6 (the mercenary, most monsters' AIs). 0x598010 (game, unit, ...) -> the kept target by its kind (the getter below): 1 a player, 2 a monster, 4 a missile, by id; 3 (Confuse) a search with the unit's alignment changed for it (0x48E600); one dead or out of reach cleared (0x5449A0). Read: passive pets |
 | kept target | 0x544A00 / 0x544A60 / 0x5459A0 / 0x5449A0 | a monster's kept target: monster data +0x44 its kind, +0x40 its id. The kind's getter (monster) -> u32 (callers 0x598010 and AiPet's 0x5D5A70), the id's 0x544A60, the setter 0x5459A0 (monster, kind, id: only for a monster whose MonStats has switchai, flags +0x3C bit 16, which every pet has but the Valkyrie, the invisible pet and the three vines), the clear 0x5449A0. Set by Attract's step 0x55ABB0 (only on a monster of the monsters' side, 0x559E40) and Confuse's 0x55AC40 (only on an enemy of the caster): never on a pet; by a summoning skill's spawn helper 0x520930 (server do function 155), the init of AI mode 11 (0x5CD2F0) and the Warlock demons' AI (0x5D2170). Hooked (the kind's getter): passive pets |
+| game events | 0x48B720 / 0x48BE80 / 0x48B890 / 0x48CC10 | an event: +0x00 u8 type (0..14), +0x02 flags, +0x04 the frame it is for, +0x08 its unit, +0x18 / +0x1C / +0x20 three parameters, +0x28 .. +0x38 list links, +0x48 a callback or 0. The add 0x48B720 (game, unit, type, frame, p1, p2, p3; no callback) goes to 0x48BE80 (game, unit, type, frame, callback, p1, p2, p3): a frame not after the game's (+0x170) is made the next one. 0x48B890 (game, unit, type, 0) walks the unit's events (0x48FE50) for that type: Revive calls it before it puts the AI's think event again. 0x48CC10 (game, event) frees one. Read |
+| monster events | 0x48C790 / 0x447420 / 0x1D1A7A0 | the events are run by an executor of the unit's type (five of them, 0x48C4D0 .. 0x48CA80, each with its own handler); the monsters' 0x48C790 hands each event of the frame to its callback, else to 0x447420 (game, monster, type, p1, p2, p3; it asserts a monster), then frees it (0x48CC10). 0x447420: nothing while the byte 0x2AAEA9C is set; types 6, 7, 10 and 11 are skipped while the monster is frozen (state 1) and not dead, and the event is freed all the same (a revive frozen as its time ends stays: the game's own); type 2 (the AI's think) is put off 25 frames when 0x446E40 says so (asked with 0x4A3010's answer); else the table 0x1D1A7A0 by type: 0 0x446EB0, 1 0x446FA0, 2 0x4A2A00 (the AI dispatcher), 3 0x448C00, 5 0x435520, 6 0x4485F0, 7 0x498EB0 (a monster mod's event), 8 0x437460, 9 0x437230, 10 0x447E30, 12 0x42EA80. Read |
+| monster mods | 0x4995E0 / 0x2395FE0 / 0x498EB0 / 0x49D240 / 0x2396210 | a mod added (game, monster, mod, flag): into the first free of the monster's 9 (0x38E310), then the mod's maker (table 0x2395FE0, a pointer a mod; MonUMod 21 has none). A mod's event, type 7 with the mod its first parameter: 0x498EB0 -> 0x49D240 (game, monster, 0, kind 2, mod, p2), which runs the mod's routine of that kind when the monster has the mod: records 0x30 bytes a mod at 0x2396210, six routines by kind (0 none; kind 2 the timer at +0x10, kind 5 at +0x28 handed the third argument). MonUMod 21 is killself (monumod.txt): its record has only the timer 0x4A1D20, the one pointer to it in the image (0x2396610); D2RCore names none of these. Read |
+| killself timer | 0x4A1D20 | (game, monster, mod, the monster's unique flag (0x38E870 (monster, 8))): a dead monster (0x34C2C0) nothing; one with state 0x36 (uninterruptable) the same event again at the game's frame + 3; else its owner (0x4A53C0): a player -> the pet removal 0x4FFD30 (game, owner, the monster's id, 1); no owner, or another kind -> the death mode (0x4471E0 (monster, 0, record), 0x4475C0 (game, record, 1)). Hooked: permanent revives |
+| killself's users | 0x55E7E0 / 0x556560 / 0x5710C0 / 0x584480 / 0x5A8750 | each adds mod 21 (0x4995E0) and its event (type 7, the mod its parameter) at the game's frame + a length. Revive (srvdofunc 58, 0x55E7E0): the corpse (0x48FE20) through 0x55A510, 0x55EDB0 and 0x55F8E0, its life (stats 7 and 6) and level, the owner (0x4A5800 (game, pet, owner id, owner type)), the unit to go to (0x5971B0), the AI's think event (type 2) 15 frames on, alignment 2 (0x48E600), the kept target cleared, unit flag 0x80000000 (0x34E190), state 0x60 revive (0x3354C0), then the skill's calc2 (Skills row +0x194, 0x3B5160: 4500 frames) above 0 -> killself and its event, then the pet registration 0x4FEB00 (game, owner, pet, the row's pet type +0x112 (a byte, below 0 none), the petmax calc +0x114). Decoy (srvdofunc 15, 0x556560: calc2 ln12, 250 frames and 125 more a level). The shadows (srvdofunc 49, 0x5710C0): only with a length (Skills row +0x80, auralencalc), none in 3.3. Reanimate As (ItemStatCost item_reanimate, itemevent kill, itemeventfunc 31 0x584320 in the item event table 0x238E5C0, which hands 0x584480 to 0x588550 as a callback): state 0x60, killself at frame + 1500, an owner but no pet registration, so in no pet list; Tomb Reaver and the Faith runeword in 3.3. 0x5A8750 (its callers 0x5A80C0 .. 0x5A85A0): monsters it spawns, killself at a random time. Read |
+| pet lists | 0x4FF3B0 / 0x4FFD30 / 0x5013F0 / 0x501550 / 0x500D80 / 0x501BC0 | a player's data (0x34B240, which asserts on anything else) +0x98: the pet lists, {entries, ...}; an entry 0x20 bytes a pet type (0x5013F0 (bank, lists, type): +0x00 the first node, +0x08 count, +0x0C max, +0x10 a group record; the number of types is the PetType rows', data tables +0x12E0); a node 0x20 bytes: +0x00 flags, +0x04 the unit's id, +0x18 the next. The lookup 0x4FF3B0 (player, id) -> the type whose list has the id, 0 none (types 1 up). The removal 0x4FFD30 (game, owner, id, kill): the lookup first (0 and kill: the unit killed by id, 0x500FB0), the node unlinked, the clients told (0x490D00), the unit killed (kill, 0x500FB0) or its flag 0x80000000 cleared. The registration 0x4FEB00 -> 0x501550 (game, owner, pet, type, max): the other types of its group out, the type's max set (0x501830), then 0x500D80: at the max the list is trimmed from its head (0x501BC0: 0x4FFD30 with kill), the new node appended at its tail, so the oldest gives way. PetType rows (pettype.txt order): 0 none, 1 single, 2 valkyrie, 3 golem, 4 skeleton, 5 skeletonmage, 6 revive, 7 hireable, 8 dopplezon ... 21 binddemon; a Skills row's +0x112 names its pets' (the loader's compiled rows, tests/test_revive.cpp). Called (the lookup): permanent revives |
 Client map (UI thread): a dynamic path's room at +0x20 is an ActiveRoom; ActiveRoom +0x18 the DrlgRoom (0x192B20),
 DrlgRoom +0x10 near rooms (+0x18 count), +0x48 next in its level, +0x50 flags, +0x58 ActiveRoom, +0x60/+0x64/+0x68/+0x6C
 tile x/y/w/h, +0x74 type, +0x90 level; Level +0x10 first room, +0x1C8 the DRLG, +0x1F8 id (0x360FC0); DRLG +0x830
@@ -1214,6 +1233,31 @@ right after it each end in one jump to the first stub; without that (or one of t
 greyed. Checked without the game (scratchpad harness/, 2026-10-01: the plugin's sites.cpp and mem.cpp over the dump):
 110 of 111 sites usable (the unit lookup has its two copies), the five once each, the check passing.
 
+Permanent revives (approved 2026-10-02; asked as "add a cheat so that necromancer revived minions don't time out and
+stay until death"; Joshua chose the timer dropped over a timer held while the switch is on, and Revives only over the
+same timer's Decoy and Reanimate As as well; the panel's Cheats section under Passive minions, `permanent_revives`, the
+console's `revives`). How a revive ends (the record: killself timer and the rows around it): Revive raises the monster
+with the killself monster mod and puts an event at the cast plus its calc2 (4500 frames, 180 s); the event runs the
+mod's timer, which for a pet whose owner is a player takes it out of the owner's pet list and kills it.
+- the timer is hooked. For a live monster the local player owns that is in its pet list of Revive's pet type, under the
+  switch, the original is not run. The event is freed all the same (the executor frees it after its handler, as it
+  does a frozen monster's), so nothing ends the revive any more: it stays until it dies, the game ends (pets are not
+  saved), or the game's limit (petmax, one revive a skill level) makes room for a new one, the oldest first;
+- which list: the game's own pet lookup, the first question of the pet removal the original would make next, asked
+  with the player (the tick's local server player) and the monster's id. Revive's pet type is its Skills row's +0x112
+  (the byte its do-function registers its pets under), read through the loader on the game thread from the tick, per
+  bank: 6 in 3.3. A Decoy (8) and a Reanimate As monster (in no list: 0) end as the game has them, and so does every
+  monster that is not the local player's;
+- switched off: a revive whose timer comes from then on ends as always; the ones it kept have no timer left and stay
+  until they die.
+Nothing is written, and nothing of the game's is called but the lookup and, for every other monster, the original.
+sites.cpp finds the timer and the lookup by signature (each once) and checks that the timer's pet removal (the call
+with its kill flag, `mov r9d, 1`) asks the lookup first; without that, or the hook, the switch is greyed. Checked
+without the game (scratchpad harness/, 2026-10-02: the plugin's sites.cpp and mem.cpp over the dump): 112 of 113 sites
+usable (the unit lookup has its two copies), both once, the removal 0x4FFD30, the hook's expected bytes 95.
+tests/test_revive.cpp holds the rule, and every summoning skill's compiled +0x112 to its pettype.txt row (37 skills;
+Revive alone "revive", 6).
+
 Map reveal: on the UI thread (the UI pump), under the switch, when something says the player may stand in an area
 not revealed yet (mapreveal::arm: the loader's LevelChanged with its level, ActChanged, GameJoined, LocalPlayerReady,
 PlayerResurrected; a switch or number changed in the panel or the console), from then on every frame until that area
@@ -1328,6 +1372,15 @@ RVA of the handler, arguments, description} (`killme` 0x411E70, `god` 0x410A90).
 
 Stamina is stat 10 (max 11), refilled on the tick on both the server unit and the client's mirror (the client
 decides when it stops running).
+
+Movement speed: the bonus goes in the player's base velocitypercent (stat 67), so a skill's or a state's own (in
+their stat lists) and gear's faster run/walk stack on top; the client's mirror gets the same base from the tick. The
+game sets that base to 100 for each game's character, on a new unit (the record: a character's stats for a game), and
+offline the player's id is 1 in every game. So the tick keeps what it wrote and the game's own base under it
+(movespeed.h): a base that is not what it wrote, or another unit, is the game's own, and the bonus goes on top again;
+a lowered bonus comes off the game's own base. Until 2026-10-02 the id said whether the bonus was in (Joshua: "after
+exiting the game it went back to normal speed, then if I reduced the value back to normal speed it made me even
+slower"): the next game's character never got it back, and 0 then wrote 100 - 100 + 0, a base of 0.
 
 Health bars: once a frame on the UI thread, walk the client's monster table, drop the dead, the ones that cannot be
 attacked (unit flag 0x4: hydras and the like, which the other tests let through), MonStats NPCs and unkillables and
@@ -1508,6 +1561,8 @@ pass changes nothing.
 - The loader's `PatchWrite` for the NPC record's byte: a patch is for the session, and a switch is to work, and to
   stop working, while playing.
 - Looking the local player up in the global server unit table (never there).
+- The player's id as what tells one game's character from the next one's (movement speed until 2026-10-02): offline
+  it is 1 in every game. What the tick wrote, read back from the unit, says whether its bonus is still there.
 - Taking the looks made at every frame for what slowed the game (2026-09-28): together they were under half a
   microsecond a frame. The log lines were the cost, 5 to 9 ms each on the thread that draws the frames, the DEV
   build's most of all (see What runs when). Time a thing before it is rebuilt: `cabbycodes perf`.
@@ -1550,13 +1605,17 @@ pass changes nothing.
    name, item creation, class item skill bonuses, superior kind test, magic / rare / crafted affixes, affix picker,
    automatic affix picker, curse skill step,
    Cursed monster modifier step, vendor payment, client's portal trip, portal use, portal town end, town portal
-   cast, wake in town, client's NPC menu, item free, socket contents free, cube products, item notice), "the item writer
+   cast, wake in town, client's NPC menu, item free, socket contents free, cube products, item notice, enemy test,
+   kept target, AI dispatcher, killself timer), "the item writer
    sends every item's real level to the client", "thread service: UI work accepted", "character: N presets in ...".
    No line begins with "seeds:" any more.
 2. F7 panel; Esc menu shows it automatically; the Character section shows the class and points once in a game.
 3. God mode in a pack; infinite mana with a costly skill (orb must not move); speed 0/100/300;
    exp: kill at 1x then 10x and compare the Status note; exit before death: potion, "armed", lethal hit ->
-   character screen, no death counted; settings persist across restarts.
+   character screen, no death counted; settings persist across restarts. Movement speed across games, without
+   closing the game in between: 100, Save and Exit, load a character: as fast at once ("movement speed: base
+   velocitypercent 100 -> 200 (bonus 100% on the game's own 100; a game's character, which starts without it)");
+   lower it to 0: normal speed, not slower ("... 200 -> 100 (bonus 0% on the game's own 100)").
 4. Health bars: a bar over each enemy, none over town folk, minions or the mercenary, or hydras (the Council
    Members' in Travincal and Baal's waves, a Sorceress's; DEV log "health bars: monster class 351 cannot be attacked -
    no bar", 351..353 are the hydras); bars follow while running,
@@ -2010,3 +2069,20 @@ pass changes nothing.
    "passive pets: passivemerc=1 passiveminions=0; N AI ticks of your pets kept passive, M of them with an enemy to take
    on (K enemy tests answered no, J kept targets left aside)". A switch greyed with a reason beside it, or a warning
    that begins "sites: ... your mercenary and minions cannot be made passive", is a routine read wrong: send the log.
+36. Permanent revives (log: "sites: monster mod: killself's timer (a revive's end) 0x4A1D20 / pets: which of its owner's
+   pet lists a unit is in 0x4FF3B0" hits=1 each, "sites: permanent revives the killself timer kills a player's pet with
+   the pet removal 0x4FFD30, which asks the pet lookup first", "game: ... identify bound, pet lookup bound", "permanent
+   revives: bound (the killself timer 0x4A1D20, its pet removal 0x4FFD30, the pet lookup 0x4FF3B0)", "hooks: killself
+   timer hooked at 0x4A1D20", "settings: ... revives=0", in a game "permanent revives: bank 3: Revive (skill 95) keeps
+   its revives as pet type 6"). Should the game stop when a revive's time is up, send d2rloader.log. With a
+   Necromancer that has Revive: F7, Cheats, tick "Permanent revives" (under Passive minions; "Invincible minions"
+   keeps them alive through a long test). Revive a few monsters and play on past 3 minutes: they stay ("permanent
+   revives: your revive (monster class N) came to the end of its time and stays until it dies", the first four). Untick
+   it and revive one more: that one falls after its 3 minutes, the ones kept before stay. Take a waypoint into another
+   act: they come along and stay. Switch Invincible minions off and let one be killed: it dies as always. At the limit
+   (one revive a skill level) a new revive makes the oldest fall, as in the game. An Amazon's Decoy and a monster
+   Tomb Reaver or Faith reanimates end as always. Save and Exit, load: the switch is as it was (pets are never kept
+   between games). The console: `cabbycodes revives on|off`, and the status line "permanent revives: revives=1; N
+   revives of yours stayed past their time". A switch greyed with a reason beside it, or a warning that begins
+   "sites: ... revives time out as the game has them" or "permanent revives:", is a routine or a table read wrong:
+   send the log.

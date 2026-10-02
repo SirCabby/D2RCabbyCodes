@@ -530,6 +530,21 @@ const Spec kSpecs[kCount] = {
      "48 8D 4C 24 30 C6 44 24 30 00 E8 ?? ?? ?? ?? 84 C0 74 01 CC 48 8B CB E8 ?? ?? ?? ?? 83 F8 01 75 12 48 8B 43 10 "
      "48 85 C0 74 09 8B 40 44 48 83 C4 20 5B C3 33 C0 48 83 C4 20 5B C3",
      0, 0x544A00},
+    // The killself monster mod's timer: the game in rsi, the monster in rbx, the mod in edi. A dead monster (the first
+    // call) is left alone; one with the uninterruptable state (`lea edx, [rax+36h]`, then the state test) has the same
+    // event (type 7: `lea r8d, [rax+7]`, the mod its parameter) again 3 frames on (`add r9d, 3` to the game's frame).
+    // The rest, the owner and the pet removal with its kill flag (else the death mode), is read below.
+    {kKillSelfTimer, "monster mod: killself's timer (a revive's end)",
+     "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 70 48 8B F1 41 8B F8 48 8B CA 48 8B DA E8 ?? ?? ?? ?? 85 C0 0F 85 ?? "
+     "?? ?? ?? 8D 50 36 48 8B CB E8 ?? ?? ?? ?? 85 C0 74 3A 44 8B 8E 70 01 00 00 33 C0 89 44 24 30 41 83 C1 03 89 44 "
+     "24 28 48 8B D3 48 8B CE 89 7C 24 20 44 8D 40 07 E8 ?? ?? ?? ??",
+     0, 0x4A1D20},
+    // The pet lookup: the unit's id in esi, the player in rdi; the player's data (the first call, which asserts on
+    // anything else), its pet lists at +0x98, then each pet type's list walked for the id.
+    {kPetTypeOf, "pets: which of its owner's pet lists a unit is in",
+     "48 89 5C 24 10 56 57 41 56 48 83 EC 20 8B F2 48 8B F9 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 75 13 48 8D 4C 24 50 88 "
+     "44 24 50 E8 ?? ?? ?? ?? 84 C0 74 01 CC 4C 8B B3 98 00 00 00",
+     0, 0x4FF3B0},
 };
 
 Result g_results[kCount];
@@ -550,6 +565,7 @@ ChronicleFacts g_chronicle;
 IdentifyFacts g_identify;
 bool g_protected_checked = false;
 bool g_enemy_checked = false;
+ReviveFacts g_revive;
 
 // The bytes of an instruction's RIP-relative operand, as an absolute address.
 uintptr_t rip_operand(uintptr_t insn, int disp_at, int len) {
@@ -622,6 +638,7 @@ const ChronicleFacts& chronicle_facts() { return g_chronicle; }
 const IdentifyFacts& identify_facts() { return g_identify; }
 bool protected_stat_checked() { return g_protected_checked; }
 bool enemy_test_checked() { return g_enemy_checked; }
+const ReviveFacts& revive_facts() { return g_revive; }
 uintptr_t call_target(Id id) { return call_at(address(id)); }
 
 size_t entry_bytes(Id id, uint8_t* out, size_t capacity) {
@@ -1517,6 +1534,26 @@ void derive() {
                !stubs_ok ? "the enemy test's entry stubs do not jump to it"
                          : "the AI's enemy checks do not end in a jump to the enemy test");
   }
+  // Permanent revives. The killself timer, for a monster whose owner is a player, calls the pet removal with its kill
+  // flag (`mov r9d, 1`), the owner (`mov rdx, rdi`) and the game (`mov rcx, rsi`). The pet removal's first question,
+  // past the owner's data and its pet lists (+0x98), is the pet lookup with the unit's id (`mov edx, esi`) and the
+  // owner (`mov rcx, rdi`): it must be the routine found above, so its answer is what the removal goes by.
+  g_revive = ReviveFacts{};
+  {
+    const uintptr_t timer = address(kKillSelfTimer), lookup = address(kPetTypeOf);
+    const uintptr_t kill = timer ? find_in(timer, 0x100, "41 B9 01 00 00 00 48 8B D7 48 8B CE E8") : 0;
+    const uintptr_t removal = kill ? call_at(kill + 12) : 0;
+    const uintptr_t asks =
+        removal ? find_in(removal, 0x80, "48 8B 9B 98 00 00 00 48 85 DB 0F 84 ?? ?? ?? ?? 8B D6 48 8B CF E8") : 0;
+    if (lookup && asks && call_at(asks + 21) == lookup) {
+      g_revive.pet_removal = removal;
+      g_revive.known = true;
+    } else if (timer || lookup) {
+      log_warn("sites: %s - revives time out as the game has them",
+               !removal ? "the killself timer does not remove a player's pet the way expected"
+                        : "the pet removal does not ask the pet lookup first");
+    }
+  }
   static const char* const kNames[dCount] = {"client unit table",       "server unit table",
                                              "server GetUnitByIdAndType", "client GetUnitByIdAndType",
                                              "players take no damage",  "monsters take no damage",
@@ -1593,6 +1630,9 @@ void derive() {
   logf("sites: %-28s %s", "enemy test",
        g_enemy_checked ? "its two entry stubs jump to it, and the AI's own two enemy checks end in a jump to the first"
                        : "not checked");
+  logf("sites: %-28s %sthe killself timer kills a player's pet with the pet removal 0x%llX, which asks the pet "
+       "lookup first",
+       "permanent revives", g_revive.known ? "" : "not derived ", rva_of(g_revive.pet_removal));
 }
 
 size_t dump_image(uintptr_t exe_base, const wchar_t* path) {

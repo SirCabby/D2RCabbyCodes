@@ -571,6 +571,10 @@ void draw_panel() {
               "bears, ravens, shadows, the Warlock's demons and the rest. They follow you, and what they do without "
               "an enemy stays (buffs, a Fire Golem's Holy Fire, vines eating corpses). Traps and hydras do nothing "
               "while this is on.");
+    cheat_row(cheats::kPermanentRevives, "Permanent revives",
+              "The monsters your Necromancer revives stay until they die: their 3 minutes never run out. The limit "
+              "of revives (one a skill level) is still the game's: past it, a new revive takes the oldest one's "
+              "place. Switched off, new revives time out again; the ones already kept stay until they die.");
     cheat_row(cheats::kCannotBeFrozen, "Cannot be frozen",
               "Hits never freeze or chill you (cold damage itself still hurts).");
     cheat_row(cheats::kCannotBePoisoned, "Cannot be poisoned",

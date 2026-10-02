@@ -48,6 +48,7 @@ struct Settings {
   bool invincible_minions = false;   // summons take no damage
   bool passive_mercenary = false;    // the mercenary fights nothing (it follows you)
   bool passive_minions = false;      // ... nor do your summons
+  bool permanent_revives = false;    // your revives stay until they die (their time never runs out)
   bool cannot_be_frozen = false;     // hits never freeze or chill you
   bool cannot_be_poisoned = false;   // hits never poison you, and a poison already on you ends
   bool cannot_be_cursed = false;     // a monster's curse is never put on you, and a curse already on you ends

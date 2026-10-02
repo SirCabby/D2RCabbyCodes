@@ -121,6 +121,7 @@ std::string value_of(const Settings& s, const std::string& key) {
   if (key == "invincible_minions") return s.invincible_minions ? "true" : "false";
   if (key == "passive_mercenary") return s.passive_mercenary ? "true" : "false";
   if (key == "passive_minions") return s.passive_minions ? "true" : "false";
+  if (key == "permanent_revives") return s.permanent_revives ? "true" : "false";
   if (key == "cannot_be_frozen") return s.cannot_be_frozen ? "true" : "false";
   if (key == "cannot_be_poisoned") return s.cannot_be_poisoned ? "true" : "false";
   if (key == "cannot_be_cursed") return s.cannot_be_cursed ? "true" : "false";
@@ -160,7 +161,7 @@ const char* const kOrder[] = {"enabled", "god_mode", "infinite_mana", "infinite_
                               "best_affixes",
                               "damage_multiplier",
                               "invincible_mercenary", "invincible_minions", "passive_mercenary", "passive_minions",
-                              "cannot_be_frozen", "cannot_be_poisoned",
+                              "permanent_revives", "cannot_be_frozen", "cannot_be_poisoned",
                               "cannot_be_cursed",
                               "infinite_town_portal", "infinite_identify", "auto_identify", "infinite_potions",
                               "infinite_keys", "no_durability_loss", "infinite_gold", "infinite_imbue",
@@ -245,6 +246,7 @@ bool set_from(Settings* s, const std::string& key, const std::string& raw) {
   if (key == "invincible_minions") return parse_bool(v, &s->invincible_minions);
   if (key == "passive_mercenary") return parse_bool(v, &s->passive_mercenary);
   if (key == "passive_minions") return parse_bool(v, &s->passive_minions);
+  if (key == "permanent_revives") return parse_bool(v, &s->permanent_revives);
   if (key == "cannot_be_frozen") return parse_bool(v, &s->cannot_be_frozen);
   if (key == "cannot_be_poisoned") return parse_bool(v, &s->cannot_be_poisoned);
   if (key == "cannot_be_cursed") return parse_bool(v, &s->cannot_be_cursed);

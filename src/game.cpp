@@ -86,6 +86,8 @@ using TakeOutFn = Unit*(__fastcall*)(void* inventory, Unit* item) noexcept;
 // An item identified (game, player, item, u8: 1 the player's own, as an Identify scroll and Cain call it; a unique or
 // set item that dropped then goes into every player's Chronicle, else the player's alone).
 using IdentifyFn = void(__fastcall*)(void* game, Unit* player, Unit* item, uint32_t own) noexcept;
+// Which of a player's pet lists a unit is in (player, unit id) -> the pet type, 0 when it is in none.
+using PetTypeFn = int32_t(__fastcall*)(Unit* player, uint32_t unit_id) noexcept;
 
 GetStatFn g_get = nullptr;
 GetStatFn g_get_base = nullptr;
@@ -148,6 +150,7 @@ GroundPutFn g_ground_put = nullptr;
 FirstItemFn g_first_item = nullptr;
 TakeOutFn g_take_out = nullptr;
 IdentifyFn g_identify = nullptr;
+PetTypeFn g_pet_type = nullptr;
 uintptr_t g_key_press[kKeyActionCount] = {};  // the entry's press function as bind checked it (0: unusable)
 bool g_key_wrapped[kKeyActionCount] = {};
 bool g_cure_failed = false;  // an unlink left its list on the unit: the cure stays off
@@ -365,6 +368,7 @@ bool bind() {
     g_take_out = known && c.sockets_free ? reinterpret_cast<TakeOutFn>(c.take_out) : nullptr;
   }
   g_identify = sites::identify_facts().known ? at<IdentifyFn>(sites::kItemIdentify) : nullptr;
+  g_pet_type = sites::revive_facts().known ? at<PetTypeFn>(sites::kPetTypeOf) : nullptr;
   bind_key_actions();
   g_cure_failed = false;
   g_bound = g_get && g_set && g_server_lookup;
@@ -382,9 +386,9 @@ bool bind() {
   logf("game: town travel %s (an act made, the move to a level, the waypoint test, an object's destination)",
        has_town_travel() ? "bound" : "MISSING");
   logf("game: item handover %s (the quest reward giver's: into the inventory, else at the feet), socket contents "
-       "take-out %s, identify %s",
+       "take-out %s, identify %s, pet lookup %s",
        has_item_handover() ? "bound" : "MISSING", has_socket_takeout() ? "bound" : "MISSING",
-       has_identify() ? "bound" : "MISSING");
+       has_identify() ? "bound" : "MISSING", has_pet_lookup() ? "bound" : "MISSING");
   logf("game: key search %s (key item type 0x%X), map reveal %s, automap save %s", has_key_check() ? "bound" : "MISSING",
        sites::key_item_type(), has_map_reveal() ? "bound" : "MISSING",
        automap_saves_any_size() ? "has the checked cell count" : "NOT CHECKED");
@@ -981,6 +985,15 @@ int take_out_socketed(Unit* item, Unit** out, int cap) {
     out[n++] = socketed;
   }
   return n;
+}
+
+bool has_pet_lookup() { return g_pet_type != nullptr; }
+
+// The lookup asks the player's data first, and asserts on a unit that is no player with its data.
+int pet_type(Unit* player, uint32_t unit_id) {
+  if (!g_pet_type || unit_type(player) != kPlayer || !mem::read_ptr(reinterpret_cast<uintptr_t>(player) + kUnitData))
+    return 0;
+  return g_pet_type(player, unit_id);
 }
 
 bool has_identify() { return g_identify != nullptr; }

@@ -27,8 +27,10 @@
 #include "itemseed.h"
 #include "loot.h"
 #include "hometown.h"
+#include "movespeed.h"
 #include "npcservice.h"
 #include "passive.h"
+#include "revive.h"
 #include "watchdog.h"
 
 namespace d2rcc::hooks {
@@ -144,6 +146,8 @@ autoid::NoticeFn g_orig_item_notice = nullptr;
 passive::DispatchFn g_orig_ai_dispatch = nullptr;
 passive::EnemyTestFn g_orig_enemy_test = nullptr;
 passive::KeptTargetFn g_orig_kept_target = nullptr;
+// Permanent revives: the killself monster mod's timer (revive.h).
+revive::TimerFn g_orig_killself = nullptr;
 volatile LONG g_pay_seen = 0;          // the first payments not taken are logged
 volatile LONG g_hit_wear_seen = 0;     // the first skipped wear of each kind is logged
 volatile LONG g_impale_wear_seen = 0;
@@ -196,9 +200,9 @@ volatile LONG g_life_kept = 0;      // god mode: a player's life losses the stat
 volatile LONG g_life_kept_seen = 0;  // the first are logged
 volatile LONG g_life_topped_seen = 0;  // ... and the first times a life above its top went down to it
 thread_local int t_life_to_top = 0;  // inside god mode's own lowering of a life to its top
-int g_speed_applied = 0;       // the velocitypercent bonus set on the player's base stat
+movespeed::State g_speed;      // what the tick wrote to the player's base velocitypercent, and the bonus in it
+volatile LONG g_speed_changed_seen = 0;  // the first times the same unit's base was found set anew are logged
 bool g_exit_armed = false;     // exit before death fires on a fall to the trigger, never on a life already there
-uint32_t g_speed_player = 0xFFFFFFFFu;
 
 volatile LONG g_exit = 0;
 char g_exit_reason[96] = {};
@@ -382,6 +386,9 @@ void tick(void* game, Unit* player) {
   if (const uint8_t bank = game::unit_table_bank(player);
       !cheats::why_not(cheats::kCannotBeCursed) && !curses::ready(bank) && (st.ticks % 125) == 1)
     curses::collect();  // which states are curses (the curse hooks ask)
+  if (const uint8_t bank = game::unit_table_bank(player);
+      !cheats::why_not(cheats::kPermanentRevives) && !revive::ready(bank) && (st.ticks % 125) == 1)
+    revive::collect();  // Revive's pet type (the killself timer's hook asks)
   hometown::on_tick(game, player, st.ticks);  // the acts' towns, and the ones the character can reach
   npcservice::on_tick();  // an NPC's service switched on: no quest asks for it in the game's NPC table
   terror::on_tick(game, st.ticks);  // all areas terrorized: every act's zone applied as a shard applies it
@@ -428,23 +435,28 @@ void tick(void* game, Unit* player) {
   }
   // Movement: the bonus lives in the player's base velocitypercent, so the
   // game's own additions (skills, states) stack on top and come and go as
-  // usual. The client keeps a mirror of the unit; its base is kept equal so
-  // the movement it predicts matches what the game decides.
-  const int bonus = cheats::move_speed_bonus();
-  if (st.player_id != g_speed_player) {
-    g_speed_player = st.player_id;
-    g_speed_applied = 0;  // a new character starts without our bonus
-  }
-  if (bonus != g_speed_applied && game::has_base_stat()) {
-    const int32_t base = game::get_base_stat(player, game::kVelocityPercent);
-    game::set_stat(player, game::kVelocityPercent, base - g_speed_applied + bonus);
-    logf("movement speed: base velocitypercent %d -> %d (bonus %d%%)", base, base - g_speed_applied + bonus, bonus);
-    g_speed_applied = bonus;
-  }
-  if (Unit* client = game::local_client_player(); client && game::has_base_stat()) {
-    const int32_t sbase = game::get_base_stat(player, game::kVelocityPercent);
-    const int32_t cbase = game::get_base_stat(client, game::kVelocityPercent);
-    if (cbase != sbase) game::set_stat(client, game::kVelocityPercent, sbase);
+  // usual. A base the tick did not write is the game's own: every game's
+  // character starts at 100, on a new unit with the same id (movespeed.h).
+  // The client keeps a mirror of the unit; its base is kept equal so the
+  // movement it predicts matches what the game decides.
+  if (game::has_base_stat()) {
+    int32_t base = game::get_base_stat(player, game::kVelocityPercent);
+    if (const int32_t to = movespeed::target(g_speed, player, base, cheats::move_speed_bonus()); to != base) {
+      game::set_stat(player, game::kVelocityPercent, to);
+      const int32_t was = base;
+      base = game::get_base_stat(player, game::kVelocityPercent);
+      movespeed::wrote(g_speed, base);
+      // A base set anew on the same unit is the game's (or someone else's) doing, which nothing known does in play:
+      // the first times are logged, not each, should it be done at every tick.
+      if (g_speed.found != movespeed::Found::kChanged || log_first(&g_speed_changed_seen, 4))
+        logf("movement speed: base velocitypercent %d -> %d (bonus %d%% on the game's own %d%s)", was, base,
+             g_speed.bonus, g_speed.own,
+             g_speed.found == movespeed::Found::kNewUnit   ? "; a game's character, which starts without it"
+             : g_speed.found == movespeed::Found::kChanged ? "; the base was set anew under the bonus"
+                                                           : "");
+    }
+    if (Unit* client = game::local_client_player(); client && game::get_base_stat(client, game::kVelocityPercent) != base)
+      game::set_stat(client, game::kVelocityPercent, base);
   }
   // Exit before death watches for a fall to the trigger (1 life, or the
   // threshold). A life that is already there when the switch goes on - a
@@ -878,6 +890,13 @@ uint64_t __fastcall hk_kept_target(Unit* monster) noexcept {
   return passive::kept_target(g_orig_kept_target, monster);
 }
 
+// The killself monster mod's timer: the end of a revive's time (and of a Decoy's, of a monster an item's Reanimate As
+// raised, of some the game spawns for a while). Not run for a revive of the local player's under the switch, which
+// then stays until it dies (revive.cpp); any other's is the game's.
+void __fastcall hk_killself_timer(void* game, Unit* monster, int32_t mod, int32_t unique) noexcept {
+  revive::timer(g_orig_killself, game, monster, mod, unique);
+}
+
 // A death's wake: the game's own first, which makes the player whole and wakes it in the town of the act it died
 // in; then, for the local player that was dead when the request came, the move on to the home town.
 uint64_t __fastcall hk_wake_in_town(void* game, Unit* player, void* packet, int32_t size) noexcept {
@@ -1277,6 +1296,10 @@ bool install() {
       enemy_test && install_one(sites::kKeptTarget, &hk_kept_target, &g_orig_kept_target, "kept target");
   const bool ai_dispatch =
       kept_target && install_one(sites::kAiDispatch, &hk_ai_dispatch, &g_orig_ai_dispatch, "AI dispatcher");
+  // Permanent revives: the killself monster mod's timer, the end of a revive's time.
+  const char* revive_why = revive::bind();
+  const bool killself =
+      !revive_why && install_one(sites::kKillSelfTimer, &hk_killself_timer, &g_orig_killself, "killself timer");
 
   cheats::set_why_not(cheats::kGodMode, g_life_guarded || execute ? nullptr : "damage routines not hooked");
   cheats::set_why_not(cheats::kInfiniteMana, regen ? nullptr : "stat regeneration not hooked");
@@ -1327,6 +1350,11 @@ bool install() {
                                                     : nullptr;
   cheats::set_why_not(cheats::kPassiveMerc, passive_reason);
   cheats::set_why_not(cheats::kPassivePets, passive_reason);
+  cheats::set_why_not(cheats::kPermanentRevives, !regen                  ? "stat regeneration not hooked"
+                                                 : revive_why            ? revive_why
+                                                 : !killself             ? "revive timer not hooked"
+                                                 : !revive::has_tables() ? "the game's skill table is unavailable"
+                                                                         : nullptr);
   cheats::set_why_not(cheats::kCannotBeFrozen, damage_why);
   cheats::set_why_not(cheats::kCannotBePoisoned, damage_why);
   if (execute && regen && !game::has_cure())
@@ -1432,6 +1460,7 @@ void uninstall() {
   g_orig_ai_dispatch = nullptr;
   g_orig_enemy_test = nullptr;
   g_orig_kept_target = nullptr;
+  g_orig_killself = nullptr;
   cube::hooked(false);
   hometown::wake_hooked(false);
   g_book_debit_return = 0;

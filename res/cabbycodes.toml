@@ -31,6 +31,10 @@ invincible_minions = false
 # them alive). Their auras still work. Traps and hydras do nothing then.
 passive_mercenary = false
 passive_minions = false
+# The monsters your Necromancer revives stay until they die: their time (3
+# minutes) never runs out. The limit of revives (one a skill level) is still
+# the game's: past it, a new revive takes the oldest one's place.
+permanent_revives = false
 # Hits never freeze or chill you (cold damage itself still hurts), and never
 # poison you (a poison already on you ends at once).
 cannot_be_frozen = false

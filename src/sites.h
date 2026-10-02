@@ -205,6 +205,14 @@ enum Id : int {
   kKeptTarget,           // (monster) -> the kind of the target kept on it (1 a player, 2 a monster, 3 a unit near, 4
                          // a missile; 0 none): the Warlock's demons keep theirs there (Attract and Confuse set one
                          // on hostile monsters); hooked
+  // Permanent revives (server thread). Revive gives the monster it raises the killself monster mod and a game event
+  // at the end of its time; the event runs the mod's timer, which takes a player's pet out of its owner's pet list and
+  // kills it. The game's lookup of which pet list a unit is in tells a revive from the other pets the timer ends.
+  kKillSelfTimer,        // (game, monster, mod, the monster's unique flag): the killself mod's timer: a monster with the
+                         // uninterruptable state has the event again 3 frames on, else a player's pet is taken out of
+                         // its owner's pet list and killed, any other monster put in its death mode (hooked)
+  kPetTypeOf,            // (player, unit id) -> the pet type of the player's pet list the unit is in, 0 none: the first
+                         // question of the pet removal the timer calls (called, read only)
   kCount
 };
 
@@ -406,6 +414,13 @@ bool protected_stat_checked();
 // The enemy test is what the AI asks: its two entry stubs jump to it, and the AI's own two enemy checks end in a jump
 // to the first.
 bool enemy_test_checked();
+// Permanent revives, read from the code of the two routines above (not known: nothing is taken for granted).
+struct ReviveFacts {
+  bool known = false;         // the killself timer removes a player's pet with its kill flag, through a routine that
+                              // asks the pet lookup above first
+  uintptr_t pet_removal = 0;  // (game, owner, unit id, kill): the pet out of its owner's pet list, killed
+};
+const ReviveFacts& revive_facts();
 uintptr_t call_target(Id site);  // where a call-site entry's `call rel32` goes (0 when unknown or not a call)
 uintptr_t exe_base();
 // The live bytes at a routine's entry (the signature's span), for the loader's expected-bytes checks.

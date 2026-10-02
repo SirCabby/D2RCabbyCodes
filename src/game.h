@@ -176,6 +176,11 @@ bool loot_filter_would_show(uint8_t bank, uint32_t item_class, int32_t quality, 
 // mercenary also carries the unit flag the game tests before it reads the hireling table.
 bool owned_by_local_player(Unit* u);  // a monster the local player owns
 bool is_mercenary(Unit* u);
+// Which of a player's pet lists a unit is in: the game's own lookup, the first question of its pet removal. A player
+// keeps a list per pet type (a PetType row: Revive's revives, a Decoy, skeletons, golems...); a monster it owns that
+// is in none (one an item's Reanimate As raised) answers 0, as does anything that is no player's pet. Reads only.
+bool has_pet_lookup();
+int pet_type(Unit* player, uint32_t unit_id);
 
 // The unit's own skills (not those an item grants) of its class, with the points spent in each:
 // the skill list at +0x100, one node per skill (+0x00 its Skills row: u16 id, charclass at +0x2C;

@@ -40,6 +40,7 @@
 #include "hometown.h"
 #include "npcservice.h"
 #include "passive.h"
+#include "revive.h"
 #include "version.h"
 #include "watchdog.h"
 
@@ -54,7 +55,8 @@ constexpr D2RL::PluginInfo kInfo{
     .version = D2RCC_VERSION,
     .author = "SirCabby",
     .description = "In-game cheat panel for offline play: god mode, infinite mana, experience and damage "
-                   "multipliers, movement speed, exit before death, invincible or passive mercenary and minions, no "
+                   "multipliers, movement speed, exit before death, invincible or passive mercenary and minions, "
+                   "revives that stay until they die, no "
                    "freeze, poison or curses, infinite potions, scrolls, keys and gold, items identified as you "
                    "pick them up, imbues, sockets and "
                    "personalizing without their quests, cube recipes that use nothing up, no durability loss, respec "
@@ -134,13 +136,13 @@ void log_settings() {
        g_settings.perfect_rolls, g_settings.all_superior, g_settings.all_ethereal, g_settings.all_socketed,
        g_settings.max_affixes, g_settings.best_affixes, config::key_name(g_settings.toggle_key),
        g_settings.show_on_pause);
-  logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d unfreezable=%d unpoisonable=%d "
-       "uncursable=%d tp=%d id=%d "
+  logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d revives=%d unfreezable=%d "
+       "unpoisonable=%d uncursable=%d tp=%d id=%d "
        "autoid=%d potions=%d keys=%d gold=%d imbue=%d addsockets=%d personalize=%d cube=%d durability=%d home=%d "
        "map=%d keep map=%d items=%d unfiltered=%d (remembered %d/%d/%d) log=%d/%s trace=%d",
        static_cast<double>(g_settings.damage_multiplier), g_settings.invincible_mercenary,
        g_settings.invincible_minions, g_settings.passive_mercenary, g_settings.passive_minions,
-       g_settings.cannot_be_frozen, g_settings.cannot_be_poisoned,
+       g_settings.permanent_revives, g_settings.cannot_be_frozen, g_settings.cannot_be_poisoned,
        g_settings.cannot_be_cursed, g_settings.infinite_town_portal, g_settings.infinite_identify,
        g_settings.auto_identify, g_settings.infinite_potions, g_settings.infinite_keys, g_settings.infinite_gold,
        g_settings.infinite_imbue, g_settings.infinite_sockets, g_settings.infinite_personalize,
@@ -344,6 +346,7 @@ void start_pump() {
   consumables::set_services(ctx, g_tables);
   curses::set_services(ctx, g_tables);
   hometown::set_services(ctx, g_tables);
+  revive::set_services(ctx, g_tables);
   if (ctx->QueryService(&g_strings) != D2RL::ServiceQueryResult::Success ||
       !D2RL::HasLocalizationServiceField(g_strings, D2RL::LocalizationServiceRequiredSize) || !g_strings->getStringById)
     g_strings = nullptr;
@@ -705,6 +708,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                                      {"merc", cheats::kInvincibleMerc}, {"minions", cheats::kInvinciblePets},
                                      {"passivemerc", cheats::kPassiveMerc},
                                      {"passiveminions", cheats::kPassivePets},
+                                     {"revives", cheats::kPermanentRevives},
                                      {"unfreezable", cheats::kCannotBeFrozen},
                                      {"unpoisonable", cheats::kCannotBePoisoned},
                                      {"uncursable", cheats::kCannotBeCursed}, {"gold", cheats::kInfiniteGold},
@@ -984,6 +988,14 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
     say(line);
   }
   {
+    // Permanent revives: the switch, why it cannot work, and the revives that stayed past their time this session.
+    const revive::Stats rs = revive::stats();
+    const char* why = cheats::why_not(cheats::kPermanentRevives);
+    std::snprintf(line, sizeof(line), "permanent revives: revives=%d%s%s; %u revives of yours stayed past their time",
+                  cheats::enabled(cheats::kPermanentRevives), why ? " - " : "", why ? why : "", rs.kept);
+    say(line);
+  }
+  {
     // Identify on pickup: the switch, why it cannot work, and what it identified this session.
     const autoid::Stats as = autoid::stats();
     const char* why = cheats::why_not(cheats::kAutoIdentify);
@@ -1030,7 +1042,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
       "bossbar on|off | exp <x> | dmg <x> | speed <pct> | tz on|off | loot on|off | chronicle on|off | drops <n> | "
       "elites on|off | "
       "perfect on|off | superior on|off | eth on|off | sockets on|off | affixes on|off | best on|off | "
-      "merc on|off | minions on|off | passivemerc on|off | passiveminions on|off | "
+      "merc on|off | minions on|off | passivemerc on|off | passiveminions on|off | revives on|off | "
       "unfreezable on|off | "
       "unpoisonable on|off | uncursable on|off | tp on|off | id on|off | autoid on|off | potions on|off | "
       "keys on|off | "

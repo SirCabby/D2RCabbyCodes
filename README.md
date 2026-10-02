@@ -17,6 +17,8 @@ Press F7, or open the game's Esc menu, and the panel is there.
   hit.
 - **Passive mercenary / passive minions** - your mercenary, and everything you summon, fight nothing: they follow
   you as always but never pick a fight, and do not hit back when hit. Their auras still work.
+- **Permanent revives** - the monsters your Necromancer revives stay until they die: their three minutes never run
+  out. The limit of revives (one a skill level) is still the game's.
 - **Cannot be frozen / cannot be poisoned** - hits never freeze or chill you, and never poison you; a poison
   already on you ends at once.
 - **Cannot be cursed** - curse immunity: a monster's curse never lands on you, and a curse already on you ends at
@@ -142,8 +144,8 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 - **F7** shows and hides the panel. With *Show on pause* on (the default) it also appears whenever the game's
   Esc menu is open, and F7 hides it for that visit.
 - The panel has six collapsible sections: *Cheats* (god mode, infinite mana and stamina, speed, experience and
-  damage multipliers, invincible and passive mercenary and minions, cannot be frozen, poisoned or cursed, infinite
-  town portal,
+  damage multipliers, invincible and passive mercenary and minions, permanent revives, cannot be frozen, poisoned or
+  cursed, infinite town portal,
   identify, potions and keys, no durability loss, infinite gold, infinite imbues, sockets and personalizing,
   infinite cube ingredients, all areas terrorized, exit before death),
   *Character* (respec,
@@ -157,6 +159,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
   `status`, `panel`, `god|mana|stamina|exit|bars|bossbar|map|ilvl on|off`, `exp <multiplier>`, `dmg <multiplier>`,
   `speed <percent>`, `merc|minions|unfreezable|unpoisonable|uncursable|tp|id|potions|keys|gold|durability on|off`,
   `passivemerc|passiveminions on|off` (your mercenary or your summons fight nothing),
+  `revives on|off` (your revives stay until they die),
   `imbue|addsockets|personalize on|off` (Charsi's, Larzuk's and Anya's service without its quest),
   `cube on|off` (cube recipes use nothing up),
   `home <0..5>` (your home town: 0 the game's own, 1 to 5 that act's town), `respec`,
@@ -182,6 +185,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `invincible_minions` | `false` | Your summons take nothing from any hit. |
 | `passive_mercenary` | `false` | The mercenary fights nothing: it follows you, and never picks a fight. |
 | `passive_minions` | `false` | Your summons fight nothing: they follow you, and never pick a fight. |
+| `permanent_revives` | `false` | The monsters your Necromancer revives stay until they die (their time never runs out). |
 | `cannot_be_frozen` | `false` | Hits never freeze or chill you. |
 | `cannot_be_poisoned` | `false` | Hits never poison you, and a poison already on you ends. |
 | `cannot_be_cursed` | `false` | A monster's curse never lands on you, and a curse already on you ends. |
@@ -484,6 +488,7 @@ The plugin hooks a handful of the game's own routines through the loader:
 | the client's NPC menu, as it opens | infinite imbues, sockets and personalizing: the game's own routine that puts the service in the NPC's menu is called, whatever the quest says |
 | the cube's product routine, the free of an item, and the free of what is in an item's sockets | infinite cube ingredients: inside a transmute, the two frees the product routine makes of what it used up are not made; when it is through, each item goes to your inventory the way the game hands you a quest reward (else at your feet, as the game drops one) |
 | a monster's AI tick, the test whether a unit is another's enemy (which every way an AI looks for a target asks), and the getter of a target kept on a monster | passive mercenary and minions: while a passive pet's AI runs, no unit is its enemy and no target is kept for it, so it finds nothing to fight; any other question gets the game's answer |
+| the timer of the "killself" monster modifier (the end of a revive's time; a Decoy's and a "Reanimate As" monster's too) | permanent revives: for one of your revives the timer is not run, so nothing ends it; the game's own pet lookup says which of your pets it is, and every other monster's timer is the game's |
 
 All areas terrorized hooks nothing: from the tick it applies each act's zone with the routine a Worldstone Shard's
 use calls (and tells the clients the way the shard does), and takes it off with the routine the half-hour rotation
