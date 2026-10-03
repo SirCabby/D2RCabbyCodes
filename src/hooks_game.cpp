@@ -57,6 +57,12 @@ using AddExperienceFn = void(__fastcall*)(void* game, Unit* unit, int32_t level,
 // the stack). It doubles the amount into the total and walks the level up the hireling record's curve.
 using HirelingExpFn = void(__fastcall*)(void* game, Unit* player, Unit* hireling, int32_t level,
                                         int32_t amount) noexcept;
+// What a kill gives one receiver: (game, receiver, its level, the monster's level, the monster's experience on the
+// stack) -> the gain, after the level penalty, the high-level ratio, the item bonus and a hireling's cap. And the ratio
+// of a level (experience.txt's ExpRatio; level 0 the shift it is divided by), asked only by that routine.
+using KillExpFn = int32_t(__fastcall*)(void* game, Unit* unit, int32_t level, int32_t monster_level,
+                                       int32_t exp) noexcept;
+using ExpRatioFn = uint32_t(__fastcall*)(uint8_t bank, int32_t level) noexcept;
 // UI: the client's level-name getter and two routines that ask it for names.
 using LevelNameFn = const char*(__fastcall*)(uint32_t dataCtx, int32_t levelId) noexcept;
 using PassthroughFn = uint64_t(__fastcall*)(void* a, void* b, void* c, void* d) noexcept;
@@ -115,6 +121,8 @@ DeathHandlerFn g_orig_death = nullptr;
 ManaCostFn g_orig_mana_cost = nullptr;
 AddExperienceFn g_orig_add_exp = nullptr;
 HirelingExpFn g_orig_hireling_exp = nullptr;
+KillExpFn g_orig_kill_exp = nullptr;
+ExpRatioFn g_orig_exp_ratio = nullptr;
 LevelNameFn g_orig_level_name = nullptr;
 PassthroughFn g_orig_automap_update = nullptr;
 PassthroughFn g_orig_automap_info = nullptr;
@@ -654,6 +662,47 @@ void __fastcall hk_hireling_exp(void* game, Unit* player, Unit* hireling, int32_
     amount = out;
   }
   if (g_orig_hireling_exp) g_orig_hireling_exp(game, player, hireling, level, amount);
+}
+
+// A kill at its full worth (approved 2026-10-03). What a kill gives a receiver is the monster's experience less the
+// game's penalty for the levels between them (5 % from ten levels above the monster), times the high-level ratio of
+// experience.txt (all of it to level 69, a quarter at 85, 0.6 % at 98), so the multiplier, applied to what is left,
+// was a few times at the top levels. Under the multiplier, for you and your mercenary, the routine is run with the
+// monster's level taken to be the receiver's own (the penalty then hands the whole amount back) and the thread marked,
+// so the ratio getter answers the whole ratio. The item bonus, a hireling's cap of its level's share and the rest are
+// the game's own; quest rewards never pass here.
+thread_local int t_full_worth = 0;
+bool g_full_worth = false;  // both hooks are in
+volatile LONG g_full_worth_seen = 0;
+
+int32_t __fastcall hk_kill_exp(void* game, Unit* unit, int32_t level, int32_t monster_level, int32_t exp) noexcept {
+  if (!g_orig_kill_exp) return 0;
+  if (!g_full_worth || !unit || exp <= 0 || !cheats::enabled(cheats::kExpMultiplier))
+    return g_orig_kill_exp(game, unit, level, monster_level, exp);
+  const bool mine = game::is_local_player(unit);
+  if (!mine && !(game::is_mercenary(unit) && game::owned_by_local_player(unit)))
+    return g_orig_kill_exp(game, unit, level, monster_level, exp);
+  ++t_full_worth;
+  const int32_t full = g_orig_kill_exp(game, unit, level, level, exp);
+  --t_full_worth;
+  ++g_status.exp_full;
+  if (log_first(&g_full_worth_seen, 4)) {
+    // What the game itself would have given (the routine only reads), for the comparison.
+    const int32_t own = g_orig_kill_exp(game, unit, level, monster_level, exp);
+    logf("experience: a kill counts its full worth for %s: %d (level %d against a monster of level %d; the game's "
+         "own reductions would leave %d)",
+         mine ? "you" : "your mercenary", full, level, monster_level, own);
+  }
+  return full;
+}
+
+uint32_t __fastcall hk_exp_ratio(uint8_t bank, int32_t level) noexcept {
+  if (!g_orig_exp_ratio) return 0;
+  if (t_full_worth && level >= 1) {
+    const uint32_t shift = g_orig_exp_ratio(bank, 0);  // what the ratio is divided by: 2 to that power
+    if (shift >= 1 && shift <= 30) return 1u << shift;
+  }
+  return g_orig_exp_ratio(bank, level);
 }
 
 // The area level after the name: only while the automap or the waypoint panel
@@ -1224,6 +1273,17 @@ bool install() {
   const bool merc_exp =
       install_one(sites::kHirelingAddExperience, &hk_hireling_exp, &g_orig_hireling_exp, "hireling experience");
   if (exp && !merc_exp) logf("hooks: the experience multiplier leaves the mercenary's gains the game's own");
+  // A kill at its full worth: the ratio getter first (it answers otherwise only while the kill's routine has marked
+  // the thread), then that routine.
+  if (exp && sites::kill_experience_checked()) {
+    const bool ratio = install_one(sites::kExpRatio, &hk_exp_ratio, &g_orig_exp_ratio, "experience ratio");
+    g_full_worth = ratio && install_one(sites::kKillExperience, &hk_kill_exp, &g_orig_kill_exp, "kill experience");
+  }
+  if (exp)
+    logf("hooks: the experience multiplier %s",
+         g_full_worth ? "counts a kill at its full worth (the game's high-level ratio and its penalty for the levels "
+                        "between you and the monster left out), for you and your mercenary"
+                      : "scales what a kill gives after the game's own reductions");
   const bool names = install_one(sites::kClientGetLevelName, &hk_level_name, &g_orig_level_name, "CLIENT_GetLevelName");
   const bool automap = names && install_one(sites::kAutomapInfoUpdate, &hk_automap_info, &g_orig_automap_info, "AutomapInfo_Update");
   if (names) install_one(sites::kAutomapUpdate, &hk_automap_update, &g_orig_automap_update, "AutomapPanel_Update");
@@ -1513,6 +1573,10 @@ void uninstall() {
   g_orig_death = nullptr;
   g_orig_mana_cost = nullptr;
   g_orig_add_exp = nullptr;
+  g_orig_hireling_exp = nullptr;
+  g_orig_kill_exp = nullptr;
+  g_orig_exp_ratio = nullptr;
+  g_full_worth = false;
   g_orig_level_name = nullptr;
   g_orig_automap_update = nullptr;
   g_orig_automap_info = nullptr;

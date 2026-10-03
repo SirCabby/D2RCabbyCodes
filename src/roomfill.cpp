@@ -37,18 +37,22 @@ struct Job {
 struct Done {
   void* drlg;
   int id;
+  bool filled;   // its rooms were built and filled (else it had nothing to fill for the landmarks alone)
+  bool objects;  // ... and its objects handed to the map (filled with the landmarks off: not yet)
 };
 
 Job g_job;
 std::vector<Done> g_done;  // the areas filled (or with nothing to fill) on a DRLG of this game
+void* g_read_drlg = nullptr;  // the area whose named enemies were read last (an area entered is read again)
+int g_read_id = -1;
 volatile LONG g_ready = 0, g_armed = 1, g_reset = 0;
-volatile LONG g_areas = 0, g_rooms = 0, g_objects = 0;
+volatile LONG g_areas = 0, g_rooms = 0, g_objects = 0, g_monsters = 0, g_reads_logged = 0;
 LARGE_INTEGER g_freq{};
 
-bool is_done(void* drlg, int id) {
-  for (const Done& d : g_done)
-    if (d.drlg == drlg && d.id == id) return true;
-  return false;
+Done* done_of(void* drlg, int id) {
+  for (Done& d : g_done)
+    if (d.drlg == drlg && d.id == id) return &d;
+  return nullptr;
 }
 
 double ms_since(const LARGE_INTEGER& t0) {
@@ -98,34 +102,78 @@ bool all_filled() {
   return true;
 }
 
-// Every object in the area's built rooms, handed to the map (those with an icon go on it).
-void report(ULONGLONG now) {
+// What the area's built rooms hold: its objects (those with an icon go on the map) and its live monsters (the named
+// ones are marked). Returns how many rooms are built, and how many of them the game has not filled.
+int units_of(void* level, std::vector<mapmarks::PlacedObject>* objects, std::vector<Unit*>* monsters, int* unfilled) {
   const sites::FillFacts& f = sites::fill_facts();
-  std::vector<mapmarks::PlacedObject> objects;
-  int n = 0, unfilled = 0, rooms = 0;
-  for (void* room = game::level_first_room(g_job.level); room && n < kMaxRooms; room = game::room_next(room), ++n) {
+  int n = 0, rooms = 0;
+  for (void* room = game::level_first_room(level); room && n < kMaxRooms; room = game::room_next(room), ++n) {
     void* active = game::room_built(room);
     if (!active) continue;
     ++rooms;
-    if (!filled(active)) ++unfilled;
+    if (unfilled && !filled(active)) ++*unfilled;
     uintptr_t unit = mem::read_ptr(reinterpret_cast<uintptr_t>(active) + static_cast<uintptr_t>(f.room_units_at));
     for (int k = 0; unit && k < kMaxRoomUnits; ++k) {
       Unit* u = reinterpret_cast<Unit*>(unit);
+      const uint32_t type = game::unit_type(u);
       int32_t px = 0, py = 0;
-      if (game::unit_type(u) == game::kObject && game::unit_pixels(u, &px, &py))
-        objects.push_back(mapmarks::PlacedObject{game::unit_class(u), px, py});
+      if (objects && type == game::kObject && game::unit_pixels(u, &px, &py))
+        objects->push_back(mapmarks::PlacedObject{game::unit_class(u), px, py});
+      else if (monsters && type == game::kMonster && !game::unit_is_dead(u))
+        monsters->push_back(u);
       unit = mem::read_ptr(unit + static_cast<uintptr_t>(f.unit_next_at));
     }
   }
-  const int icons = mapmarks::objects_found(g_job.bank, g_job.id, objects.data(), objects.size());
+  return rooms;
+}
+
+// The objects of an area filled before while the landmarks were off, handed to the map once they are on.
+void give_objects(void* level, int id, uint8_t bank) {
+  std::vector<mapmarks::PlacedObject> objects;
+  units_of(level, &objects, nullptr, nullptr);
+  const int icons = mapmarks::objects_found(bank, id, objects.data(), objects.size());
+  InterlockedExchangeAdd(&g_objects, icons);
+  logf("landmarks: level %d, filled before: %zu objects in the area, %d with an icon handed to the map", id,
+       objects.size(), icons);
+}
+
+// The named enemies of an area filled before, read again as it is entered (they may have died, or been joined by
+// others: a terror zone's Heralds come with kills).
+void read_monsters(void* level, int id, uint8_t bank) {
+  std::vector<Unit*> monsters;
+  units_of(level, nullptr, &monsters, nullptr);
+  const int named = mapmarks::monsters_found(bank, id, monsters.data(), monsters.size());
+  if (log_first(&g_reads_logged, 4))
+    logf("named enemies: level %d entered again: %d of its %zu monsters named, read from the server", id, named,
+         monsters.size());
+}
+
+// Every object in the area's built rooms handed to the map (those with an icon go on it), and every monster (the named
+// ones are marked).
+void report(ULONGLONG now, bool landmarks, bool enemies) {
+  std::vector<mapmarks::PlacedObject> objects;
+  std::vector<Unit*> monsters;
+  int unfilled = 0;
+  const int rooms = units_of(g_job.level, landmarks ? &objects : nullptr, enemies ? &monsters : nullptr, &unfilled);
+  const int icons = landmarks ? mapmarks::objects_found(g_job.bank, g_job.id, objects.data(), objects.size()) : 0;
+  const int named = enemies ? mapmarks::monsters_found(g_job.bank, g_job.id, monsters.data(), monsters.size()) : 0;
   InterlockedIncrement(&g_areas);
   InterlockedExchangeAdd(&g_rooms, g_job.built);
   InterlockedExchangeAdd(&g_objects, icons);
-  logf("landmarks: level %d: %d rooms built ahead for the game to fill (%d were built already, %d could not be), "
-       "filled in %llu ms%s; %zu objects in the area, %d with an icon handed to the map",
-       g_job.id, g_job.built, rooms > g_job.built ? rooms - g_job.built : 0, g_job.failed,
-       static_cast<unsigned long long>(now - g_job.started), unfilled ? " (some not filled in time)" : "",
-       objects.size(), icons);
+  InterlockedExchangeAdd(&g_monsters, named);
+  char what[160] = {};
+  if (landmarks && enemies)
+    std::snprintf(what, sizeof(what), "%zu objects in the area, %d with an icon handed to the map; %zu monsters, %d "
+                  "of them named", objects.size(), icons, monsters.size(), named);
+  else if (landmarks)
+    std::snprintf(what, sizeof(what), "%zu objects in the area, %d with an icon handed to the map", objects.size(), icons);
+  else
+    std::snprintf(what, sizeof(what), "%zu monsters in the area, %d of them named", monsters.size(), named);
+  logf("%s: level %d: %d rooms built ahead for the game to fill (%d were built already, %d could not be), filled in "
+       "%llu ms%s; %s",
+       landmarks ? "landmarks" : "named enemies", g_job.id, g_job.built, rooms > g_job.built ? rooms - g_job.built : 0,
+       g_job.failed, static_cast<unsigned long long>(now - g_job.started), unfilled ? " (some not filled in time)" : "",
+       what);
 }
 
 }  // namespace
@@ -135,10 +183,11 @@ void bind() {
   const sites::FillFacts& f = sites::fill_facts();
   const bool ok = f.known && game::has_room_build();
   InterlockedExchange(&g_ready, ok ? 1 : 0);
-  logf("landmarks: the shrines the game rolls %s", ok ? "are put on the map ahead (the rooms of an area built as it is "
-                                                        "entered, for the game to fill)"
-                                                      : "are put on the map as the game shows them (its room fill not "
-                                                        "found as expected)");
+  logf("landmarks: the shrines the game rolls %s; named enemies %s",
+       ok ? "are put on the map ahead (the rooms of an area built as it is entered, for the game to fill)"
+          : "are put on the map as the game shows them (its room fill not found as expected)",
+       ok ? "are read from the server's side as an area is entered (its rooms filled the same way)"
+          : "are marked as the client sees them");
 }
 
 bool ready() { return g_ready != 0; }
@@ -149,9 +198,15 @@ void on_tick(void* game, Unit* player, uint32_t tick) {
   if (g_reset && InterlockedExchange(&g_reset, 0)) {
     g_job = Job{};
     g_done.clear();
+    g_read_drlg = nullptr;
+    g_read_id = -1;
   }
-  if (!cheats::enabled(cheats::kMapLandmarks)) {
+  const bool landmarks = cheats::enabled(cheats::kMapLandmarks) && mapmarks::landmarks_ready();
+  const bool enemies = cheats::enabled(cheats::kMapEnemies) && mapmarks::enemies_ready();
+  if (!landmarks && !enemies) {
     g_job = Job{};
+    g_read_drlg = nullptr;
+    g_read_id = -1;
     return;
   }
   // Looked at when something says the character may stand somewhere new, once a second besides, and at every frame
@@ -163,14 +218,27 @@ void on_tick(void* game, Unit* player, uint32_t tick) {
   void* drlg = game::level_drlg(level);
   const int id = game::level_id_of(level);
   if (!level || !drlg || id <= 0) return;
-  if (is_done(drlg, id)) {
+  const uint8_t bank = game::game_bank(game);
+  if (!mapmarks::ready(bank)) return;  // the tables, in the first seconds of a game
+  // Filled for the landmarks: an area whose object groups can roll an object with an icon. For the named enemies: every
+  // area but a town (its monsters are made as its rooms are filled).
+  const bool wants = (landmarks && mapmarks::level_rolls_icons(bank, id)) || (enemies && !game::town_level(id));
+  if (Done* d = done_of(drlg, id); d && (d->filled || !wants)) {
+    // Filled before: its named enemies are read again as it is entered (a switch changed counts too), and its objects
+    // handed to the map if the landmarks were off then.
+    const bool entered = armed || drlg != g_read_drlg || id != g_read_id;
+    if (enemies && d->filled && entered) read_monsters(level, id, bank);
+    if (landmarks && d->filled && !d->objects && mapmarks::level_rolls_icons(bank, id)) {
+      give_objects(level, id, bank);
+      d->objects = true;
+    }
+    g_read_drlg = drlg;
+    g_read_id = id;
     g_job = Job{};
     return;
   }
-  const uint8_t bank = game::game_bank(game);
-  if (!mapmarks::ready(bank)) return;  // the tables, in the first seconds of a game
-  if (!mapmarks::level_rolls_icons(bank, id)) {
-    g_done.push_back(Done{drlg, id});  // nothing it rolls has an icon
+  if (!wants) {
+    g_done.push_back(Done{drlg, id, false, false});  // nothing to fill it for
     g_job = Job{};
     return;
   }
@@ -191,15 +259,22 @@ void on_tick(void* game, Unit* player, uint32_t tick) {
     return;  // the game fills them in its own pass
   }
   if (!all_filled() && now - g_job.built_at < kFillWaitMs) return;
-  report(now);
-  g_done.push_back(Done{drlg, id});
+  report(now, landmarks, enemies);
+  if (Done* d = done_of(drlg, id)) {
+    d->filled = true;
+    d->objects = landmarks;
+  } else {
+    g_done.push_back(Done{drlg, id, true, landmarks});
+  }
+  g_read_drlg = drlg;
+  g_read_id = id;
   g_job = Job{};
 }
 
 void game_left() {
   InterlockedExchange(&g_reset, 1);
   InterlockedExchange(&g_armed, 1);
-  for (volatile LONG* v : {&g_areas, &g_rooms, &g_objects}) InterlockedExchange(v, 0);
+  for (volatile LONG* v : {&g_areas, &g_rooms, &g_objects, &g_monsters, &g_reads_logged}) InterlockedExchange(v, 0);
 }
 
 Stats stats() {
@@ -207,6 +282,7 @@ Stats stats() {
   s.areas = static_cast<unsigned>(g_areas);
   s.rooms = static_cast<unsigned>(g_rooms);
   s.objects = static_cast<unsigned>(g_objects);
+  s.monsters = static_cast<unsigned>(g_monsters);
   return s;
 }
 

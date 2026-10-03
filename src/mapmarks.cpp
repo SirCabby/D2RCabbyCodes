@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 #include <vector>
 
 #include "cheats.h"
@@ -41,6 +42,10 @@ constexpr int kMaxRecords = 4096;     // a level type's records of the tile look
 constexpr int kMaxLevelTypes = 1024;
 constexpr int kDrawnLogs = 4;
 constexpr int kDeadLogs = 4;
+constexpr int kAheadLogs = 4;      // areas whose named enemies read from the server are logged
+constexpr int kNameOffLogs = 4;    // names worked out that the client's own differ from
+constexpr size_t kMaxDeadIds = 4096;  // monsters seen dead in this game (a list read before they died adds none)
+constexpr uintptr_t kUnitData = 0x10;  // a unit's data (game.cpp's): a monster's name seed, kind, mods, super unique row
 
 // The rows of the loader's tables (the game's own memory): MonStats (its name's string id, flags and Rarity),
 // SuperUniques (its name's string id, filled in as the game reads the table), Objects (its class name; the icon's cell
@@ -99,6 +104,7 @@ struct Tables {
   int icon_kinds;     // object classes with an icon
   uint32_t mon_flags[kMaxMonsters];
   uint8_t mon_rarity[kMaxMonsters];
+  uint16_t mon_name[kMaxMonsters];  // its name's string id (NameStr)
   int16_t object_cell[kMaxObjects];
   uint8_t level_act[kMaxLevels];
   char super_name[kMaxSupers][kNameLen];
@@ -120,7 +126,22 @@ struct Mark {
   ULONGLONG seen;  // the automap draw it was last drawn in itself
   bool layout;     // a layout's spot (a super unique, a boss), or the monster that took one over
   bool champion;
+  bool server;     // read from the server's side as its area was entered (it goes when the area's next read lacks it)
+  bool client_named;  // its name is the one the client gave it as it drew it
   char name[kNameLen];
+};
+// The named enemies the server has made in an area's rooms, as roomfill.cpp read them, waiting for the automap's next
+// draw (which knows the level's layer).
+struct ServerMark {
+  uint32_t unit;
+  int32_t px, py;
+  bool champion;
+  char name[kNameLen];
+};
+struct Pending {
+  uint8_t bank;
+  int level;
+  std::vector<ServerMark> marks;
 };
 struct Label {  // a name written in this draw
   int32_t x, y;
@@ -167,6 +188,9 @@ volatile LONG g_full_warned = 0;
 Exit g_exits[kMaxExits];  // under g_cs
 int g_exit_count = 0;
 std::vector<Found> g_found;  // under g_cs
+std::vector<Pending> g_pending;   // under g_cs: an area's named enemies read from the server, for the next draw
+std::vector<uint32_t> g_dead_ids;  // under g_cs: the monsters seen dead in this game
+volatile LONG g_pending_waiting = 0, g_ahead_stat = 0, g_names_off_stat = 0, g_ahead_logged = 0, g_names_off_logged = 0;
 volatile LONG g_found_waiting = 0, g_rolled_stat = 0, g_found_full_warned = 0;
 uint64_t g_found_tried = 0;  // the UI thread's
 volatile LONG g_exits_ok = 0, g_exit_areas = 0, g_warp_stat = 0, g_border_stat = 0;
@@ -239,6 +263,30 @@ bool string_by_key(const char* key, char* out, size_t cap) {
   return out[0] != 0;
 }
 
+// A string as the loader has it, its grammar tags kept (the name formatter reads them): by id, or by a key of the game's.
+std::string raw_string(uint16_t id) {
+  if (!id || !g_ctx || !g_strings || !g_strings->getStringById) return {};
+  char out[256] = {};
+  uint32_t need = 0;
+  if (g_strings->getStringById(g_ctx, id, out, static_cast<uint32_t>(sizeof(out)), &need) !=
+      D2RL::Localization::Result::Success)
+    return {};
+  out[sizeof(out) - 1] = 0;
+  return out;
+}
+std::string raw_key(const char* key) {
+  if (!key || !key[0] || !g_ctx || !g_strings || !g_strings->getStringByKey) return {};
+  char full[64];
+  std::snprintf(full, sizeof(full), "d2r:%s", key);
+  char out[256] = {};
+  uint32_t need = 0;
+  if (g_strings->getStringByKey(g_ctx, full, out, static_cast<uint32_t>(sizeof(out)), &need) !=
+      D2RL::Localization::Result::Success)
+    return {};
+  out[sizeof(out) - 1] = 0;
+  return out;
+}
+
 // A copy of a table's rows (game thread), empty when it is not there or its rows are of another size.
 std::vector<uint8_t> rows_of(D2RL::DataTables::Bank bank, D2RL::DataTables::TableId table, uint32_t row_size,
                              int most, int* count) {
@@ -291,6 +339,7 @@ bool read_bank(int b, Tables* t) {
   for (int i = 0; i < monsters; ++i) {
     t->mon_flags[i] = field<uint32_t>(mon, kMonStatsRow, i, kMonFlags);
     t->mon_rarity[i] = field<uint8_t>(mon, kMonStatsRow, i, kMonRarity);
+    t->mon_name[i] = field<uint16_t>(mon, kMonStatsRow, i, kMonName);
     if (boss_row(t->mon_flags[i], t->mon_rarity[i]) && t->bosses < kMaxBosses) {
       BossName& n = t->boss[t->bosses++];
       n.row = i;
@@ -474,6 +523,8 @@ void spawn_spot(const Tables& t, uint32_t cls, int32_t x, int32_t y) {
     m.seen = 0;
     m.layout = true;
     m.champion = false;
+    m.server = false;
+    m.client_named = false;
     std::snprintf(m.name, sizeof(m.name), "%s", name);
   }
   LeaveCriticalSection(&g_cs);
@@ -674,6 +725,65 @@ void exits_found() {
        found.size() == 1 ? "" : "s", found.empty() ? "" : " - ", names);
 }
 
+// --- the server's named enemies (read ahead) -------------------------------------------------------------------------
+
+// The name the client gives a monster, worked out from the server's copy of it (the server thread): what the client is
+// sent of a monster is the server's own (its kind, its super unique row, its mods, its name seed), and its naming
+// handler (sites::NameFacts) runs only for one with the unique bit. A boss by its row, and any monster the handler does
+// not name (or when what it needs was not read), has its monster's name.
+void server_name(const Tables& t, Unit* u, uint32_t cls, uint16_t kind, bool boss, char* out, size_t cap) {
+  const sites::NameFacts& f = sites::name_facts();
+  const uintptr_t data = mem::read_ptr(reinterpret_cast<uintptr_t>(u) + kUnitData);
+  std::string name;
+  if (!boss && f.known && data && (kind & kKindUnique)) {
+    if (kind & kKindHerald) {
+      char key[48];
+      std::snprintf(key, sizeof(key), "%s%d", f.herald_key, game::get_stat(u, f.herald_stat));
+      name = raw_key(key);
+      if (name.empty()) name = raw_key(f.herald_default);
+    } else if (kind & kKindSuperUnique) {
+      uint16_t row = 0xFFFF;
+      if (mem::read_safe(data + static_cast<uintptr_t>(f.super_at), &row) && row < t.supers) name = t.super_name[row];
+      if (name.empty()) name = raw_string(f.super_default);
+    } else if (champion(kind)) {
+      uint8_t mods[9] = {};
+      const int naming[2] = {f.base_mod, f.fixed_mod};
+      const int type = mem::copy_from(mods, data + static_cast<uintptr_t>(f.mods_at), sizeof(mods))
+                           ? champion_type(mods, 9, f.champion_mod, f.champion_types, naming, 2)
+                           : -1;
+      if (type >= 0)
+        name = format_name(raw_string(f.champion_format).c_str(),
+                           {raw_string(f.champion_text[type]), raw_string(t.mon_name[cls])});
+    } else {
+      // A random unique: three lists of the unit's bank, picked from its name seed's stream.
+      const uint8_t bank = game::unit_table_bank(u);
+      const uintptr_t tables = mem::read_ptr(f.tables + static_cast<uintptr_t>(bank) * 16);
+      uint64_t counts[3] = {};
+      uintptr_t lists[3] = {};
+      bool ok = bank < 4 && tables;
+      for (int k = 0; k < 3 && ok; ++k) {
+        const uintptr_t at = tables + static_cast<uintptr_t>(f.lists_at + k * f.list_stride);
+        ok = mem::read_safe(at, &lists[k]) && mem::read_safe(at + 8, &counts[k]) && lists[k] && counts[k] < 0x10000;
+      }
+      uint16_t seed = 0;
+      if (ok && mem::read_safe(data + static_cast<uintptr_t>(f.seed_at), &seed)) {
+        const UniquePicks p = unique_picks(seed, f.seed_hi, counts, f.coin_mod, f.coin_below);
+        const auto id_at = [&lists](int k, uint64_t i) {
+          uint16_t id = 0;
+          mem::read_safe(lists[k] + static_cast<uintptr_t>(i) * 2, &id);
+          return id;
+        };
+        std::vector<std::string> args = {raw_string(id_at(0, p.prefix)), raw_string(id_at(1, p.suffix))};
+        if (p.has_appellation) args.push_back(raw_string(id_at(2, p.appellation)));
+        name = format_name(raw_string(p.has_appellation ? f.unique_format2 : f.unique_format1).c_str(), args);
+      }
+    }
+  }
+  if (name.find_first_not_of(' ') == std::string::npos) name = raw_string(t.mon_name[cls]);  // the caller's class is one of the rows
+  std::snprintf(out, cap, "%s", name.c_str());
+  strip_tag(out);
+}
+
 // --- the automap's draw (its thread) -----------------------------------------------------------------------------------
 
 // A named monster seen dead: its mark goes for good (a layout's spot of its name too), and the area's layout does not
@@ -681,6 +791,10 @@ void exits_found() {
 void forget_dead(uint32_t unit, int level, const char* name) {
   bool let_go = false;
   EnterCriticalSection(&g_cs);
+  // A read of its area made before it died does not bring it back.
+  if (unit && g_dead_ids.size() < kMaxDeadIds &&
+      std::find(g_dead_ids.begin(), g_dead_ids.end(), unit) == g_dead_ids.end())
+    g_dead_ids.push_back(unit);
   for (int i = 0; i < g_mark_count; ++i) {
     const Mark& m = g_marks[i];
     const bool spot = !m.unit && name[0] && m.level == level && std::strcmp(m.name, name) == 0;
@@ -701,8 +815,12 @@ void forget_dead(uint32_t unit, int level, const char* name) {
 }
 
 // A named monster the automap draws: its mark follows it (a layout's spot of its name in its level becomes its mark), and
-// stays where it was last drawn once it is out of the automap's sight.
-void remember(uint32_t unit, int level, int layer, int32_t px, int32_t py, const char* name, bool is_champion) {
+// stays where it was last drawn once it is out of the automap's sight. The client's name is the mark's from then on; one
+// read ahead from the server's side that was another is a name worked out wrong (a warning, the first few).
+void remember(uint32_t unit, int level, int layer, int32_t px, int32_t py, const char* name, bool is_champion,
+              uint32_t cls, uint16_t kind) {
+  bool off = false;
+  char was[kNameLen] = {};
   EnterCriticalSection(&g_cs);
   Mark* mark = nullptr;
   for (int i = 0; i < g_mark_count && !mark; ++i)
@@ -711,10 +829,18 @@ void remember(uint32_t unit, int level, int layer, int32_t px, int32_t py, const
     if (!g_marks[i].unit && g_marks[i].level == level && std::strcmp(g_marks[i].name, name) == 0) mark = &g_marks[i];
   if (!mark && g_mark_count < kMaxMarks) {
     mark = &g_marks[g_mark_count++];
-    mark->layout = false;
+    *mark = Mark{};
     std::snprintf(mark->name, sizeof(mark->name), "%s", name);
   }
   if (mark) {
+    if (mark->server && !mark->client_named && name[0] && mark->name[0] && std::strcmp(mark->name, name) != 0) {
+      off = true;
+      std::snprintf(was, sizeof(was), "%s", mark->name);
+    }
+    if (name[0]) {
+      std::snprintf(mark->name, sizeof(mark->name), "%s", name);
+      mark->client_named = true;
+    }
     mark->unit = unit;
     mark->level = level;
     mark->layer = layer;
@@ -726,6 +852,12 @@ void remember(uint32_t unit, int level, int layer, int32_t px, int32_t py, const
   LeaveCriticalSection(&g_cs);
   if (!mark && log_once(&g_full_warned, LogLevel::kWarning))
     log_warn("named enemies: %d marks on the map in this game - no more are kept", kMaxMarks);
+  if (off) {
+    InterlockedIncrement(&g_names_off_stat);
+    if (log_first(&g_names_off_logged, kNameOffLogs, LogLevel::kWarning))
+      log_warn("named enemies: monster class %u (kind 0x%X) was marked ahead as \"%s\", and the client names it \"%s\"",
+               cls, kind, was, name);
+  }
 }
 
 void counted(Unit* u, uint32_t cls, uint16_t kind, const char* name) {
@@ -784,7 +916,7 @@ void monster_drawn(Unit* u, const void* view) {
   int32_t px = 0, py = 0;
   if (!me || !game::is_hostile(me, u) || !game::unit_pixels(u, &px, &py)) return;
   const bool is_champion = champion(kind);
-  remember(id, level, game::automap_layer(), px, py, name, is_champion);
+  remember(id, level, game::automap_layer(), px, py, name, is_champion, cls, kind);
   uint64_t point = 0;
   if (!game::map_point(view, px, py, &point)) return;
   const float scale = game::map_scale(view);
@@ -794,9 +926,72 @@ void monster_drawn(Unit* u, const void* view) {
   counted(u, cls, kind, name);
 }
 
+// The named enemies read from the server's side (under g_cs, the draw thread, which can ask a level's layer): each
+// takes its mark (by its id, else a layout's spot of its name in its level, else a new one) where it stands, but for
+// one the automap draws itself now, whose place is the client's; the level's marks of the server's monsters not in the
+// newer read go (they died, or left the area), but for one the automap draws now. A level whose layer is not known yet
+// waits for the next draw.
+void take_pending() {
+  for (size_t k = 0; k < g_pending.size();) {
+    const Pending& p = g_pending[k];
+    const int layer = game::level_layer(p.bank, p.level);
+    if (layer < 0) {
+      ++k;
+      continue;
+    }
+    unsigned added = 0, gone = 0, full = 0;
+    for (int i = 0; i < g_mark_count; ++i) {
+      const Mark& m = g_marks[i];
+      if (!m.server || m.level != p.level || g_draw - m.seen <= 2) continue;
+      bool still = false;
+      for (size_t j = 0; j < p.marks.size() && !still; ++j) still = p.marks[j].unit == m.unit;
+      if (still) continue;
+      g_marks[i--] = g_marks[--g_mark_count];
+      ++gone;
+    }
+    for (const ServerMark& s : p.marks) {
+      if (std::find(g_dead_ids.begin(), g_dead_ids.end(), s.unit) != g_dead_ids.end()) continue;
+      Mark* mark = nullptr;
+      for (int i = 0; i < g_mark_count && !mark; ++i)
+        if (g_marks[i].unit == s.unit) mark = &g_marks[i];
+      for (int i = 0; i < g_mark_count && !mark && s.name[0] && !s.champion; ++i)
+        if (!g_marks[i].unit && g_marks[i].level == p.level && std::strcmp(g_marks[i].name, s.name) == 0)
+          mark = &g_marks[i];
+      if (!mark) {
+        if (g_mark_count >= kMaxMarks) {
+          ++full;
+          continue;
+        }
+        mark = &g_marks[g_mark_count++];
+        *mark = Mark{};
+        ++added;
+      }
+      mark->unit = s.unit;
+      mark->level = p.level;
+      mark->server = true;
+      mark->champion = s.champion;
+      if (g_draw - mark->seen > 2) {
+        mark->layer = layer;
+        mark->px = s.px;
+        mark->py = s.py;
+      }
+      if (!mark->client_named) std::snprintf(mark->name, sizeof(mark->name), "%s", s.name);
+    }
+    InterlockedExchangeAdd(&g_ahead_stat, static_cast<LONG>(added));
+    if (full && log_once(&g_full_warned, LogLevel::kWarning))
+      log_warn("named enemies: %d marks on the map in this game - no more are kept", kMaxMarks);
+    if (log_first(&g_ahead_logged, kAheadLogs))
+      logf("named enemies: level %d (layer %d): %zu named enemies of the server's on the map (%u new, %u gone)",
+           p.level, layer, p.marks.size(), added, gone);
+    g_pending.erase(g_pending.begin() + static_cast<ptrdiff_t>(k));
+  }
+  InterlockedExchange(&g_pending_waiting, g_pending.empty() ? 0 : 1);
+}
+
 // Once a draw (the local player's own call): the marks on the automap's layer whose monster the automap does not draw
-// itself now - a layout's spawn spot, or a named monster where it was last drawn -, and the exits of the area the
-// player is in (-1: none; at a border the next area's names its own side, and would stand over this one's).
+// itself now - a layout's spawn spot, a named monster the server has made, or one where it was last drawn -, and the
+// exits of the area the player is in (-1: none; at a border the next area's names its own side, and would stand over
+// this one's).
 void marks_drawn(const void* view, bool enemies, int exits_of) {
   ++g_draw;
   const int layer = game::automap_layer();
@@ -804,6 +999,7 @@ void marks_drawn(const void* view, bool enemies, int exits_of) {
   const float scale = game::map_scale(view);
   const int color = game::map_name_color();
   EnterCriticalSection(&g_cs);
+  if (enemies && g_pending_waiting) take_pending();
   for (int i = 0; enemies && i < g_mark_count; ++i) {
     const Mark& m = g_marks[i];
     uint64_t point = 0;
@@ -1029,6 +1225,41 @@ void put_found(uint64_t now_ms) {
        put, added, later.empty() ? "" : " - more wait for their own area's map");
 }
 
+int monsters_found(uint8_t bank, int level, Unit* const* monsters, size_t count) {
+  const Tables* t = tables_of(bank);
+  if (!t || !g_cs_ready || level <= 0) return 0;
+  Pending p;
+  p.bank = bank;
+  p.level = level;
+  for (size_t i = 0; i < count; ++i) {
+    Unit* u = monsters[i];
+    // Not one of yours (a revived unique is a pet), nor a town's people.
+    if (!u || game::unit_type(u) != game::kMonster || game::unit_is_dead(u) || game::owned_by_local_player(u)) continue;
+    const uint32_t cls = game::unit_class(u);
+    if (cls >= static_cast<uint32_t>(t->monsters) || (t->mon_flags[cls] & kMonNpc)) continue;
+    const uint16_t kind = game::monster_type_flags(u);
+    const bool boss = boss_row(t->mon_flags[cls], t->mon_rarity[cls]);
+    if (!named(kind, boss)) continue;
+    ServerMark m{};
+    m.unit = game::unit_id(u);
+    if (!game::unit_pixels(u, &m.px, &m.py)) continue;
+    m.champion = champion(kind);
+    server_name(*t, u, cls, kind, boss, m.name, sizeof(m.name));
+    p.marks.push_back(m);
+  }
+  const int named_count = static_cast<int>(p.marks.size());
+  EnterCriticalSection(&g_cs);
+  for (size_t k = 0; k < g_pending.size(); ++k)
+    if (g_pending[k].level == level) {
+      g_pending.erase(g_pending.begin() + static_cast<ptrdiff_t>(k));  // a newer read of the level replaces it
+      break;
+    }
+  g_pending.push_back(std::move(p));
+  InterlockedExchange(&g_pending_waiting, 1);
+  LeaveCriticalSection(&g_cs);
+  return named_count;
+}
+
 void game_left() {
   if (g_cs_ready) {
     EnterCriticalSection(&g_cs);
@@ -1038,10 +1269,13 @@ void game_left() {
     g_exit_count = 0;
     g_found.clear();
     InterlockedExchange(&g_found_waiting, 0);
+    g_pending.clear();
+    g_dead_ids.clear();
+    InterlockedExchange(&g_pending_waiting, 0);
     LeaveCriticalSection(&g_cs);
   }
   for (volatile LONG* v : {&g_areas, &g_icons, &g_waypoints, &g_spot_stat, &g_drawn_stat, &g_dead_stat, &g_exit_areas,
-                           &g_warp_stat, &g_border_stat, &g_rolled_stat})
+                           &g_warp_stat, &g_border_stat, &g_rolled_stat, &g_ahead_stat, &g_names_off_stat})
     InterlockedExchange(v, 0);
 }
 
@@ -1057,6 +1291,8 @@ Stats stats() {
   s.warps = static_cast<unsigned>(g_warp_stat);
   s.borders = static_cast<unsigned>(g_border_stat);
   s.rolled = static_cast<unsigned>(g_rolled_stat);
+  s.ahead = static_cast<unsigned>(g_ahead_stat);
+  s.names_off = static_cast<unsigned>(g_names_off_stat);
   if (g_cs_ready) {
     EnterCriticalSection(&g_cs);
     for (int i = 0; i < g_mark_count; ++i) s.kept += g_marks[i].unit ? 1u : 0u;

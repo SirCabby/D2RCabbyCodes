@@ -98,6 +98,7 @@ bool is_online();  // the client is in an online (Battle.net) state
 void set_current_level(int id);
 int current_level();
 bool in_town();
+bool town_level(int level);  // the five towns' level ids
 
 // Health bars. The client's side of the game, so the UI thread only: the
 // client's unit tables change as its game loop runs there.

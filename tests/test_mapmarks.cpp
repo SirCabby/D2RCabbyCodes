@@ -417,6 +417,80 @@ int main() {
     std::printf("the ObjGroup rows are not at hand (D2RCC_EXCEL) - which levels roll shrines was not checked\n");
   }
 
+  // The names of the named enemies read ahead from the server's side. The game's name formatter (0x3ADCA0): English has
+  // no header and no tags; German and French put a header saying which argument agrees with which, and tag their words.
+  CHECK(format_name("%0 %1", {"Gloom", "Hack"}) == "Gloom Hack");
+  CHECK(format_name("%0 %1 %2", {"Gloom", "Hack", "the Hammer"}) == "Gloom Hack the Hammer");
+  CHECK(format_name("a0n1:%0 %1", {"[ms]fanatischer[fs]fanatische[ns]fanatisches[pl]fanatische", "[fs]Kriegerin"}) ==
+        "fanatische Kriegerin");
+  CHECK(format_name("a0n1:%0 %1", {"[ms]fanatischer[fs]fanatische[ns]fanatisches[pl]fanatische", "Gefallener"}) ==
+        "fanatischer Gefallener");  // a noun without a tag: its [ms] form
+  CHECK(format_name("a0n1:%0 %1", {"Düsternis -", "[ms]Hack"}) == "Düsternis - Hack");  // no '[': the adjective stays
+  CHECK(format_name("a0n1:%0 %1", {"[fs]grise[ms]gris", "[mp]Diables"}) == "[fs]grise[ms]gris Diables");  // no such form
+  CHECK(format_name("%0 %1", {"Gloom ", "Hack"}) == "Gloom Hack");  // a space after the mark goes after one
+  CHECK(format_name("n0:%0", {"[fs]Hexe"}) == "Hexe");                // a noun alone loses four characters
+  CHECK(format_name("a0:%0 %1", {"[fs]rote[ms]roter", "Hund"}) == "roter Hund");  // an adjective alone: its [ms] form
+  CHECK(format_name("%0 %3", {"A", "B"}) == "A %3");
+  CHECK(format_name("%1 %0", {"A", "B"}) == "B A");
+  CHECK(format_name(nullptr, {"A"}).empty());
+  {
+    // A random unique's stream: the game's RNG from {the name seed, 666}; a pick a step (a power of two takes the low
+    // bits, another count the remainder; an empty list no step); the picks in the order prefix, suffix, the coin, the
+    // appellation on it.
+    constexpr uint64_t kMul = 0x6AC690C5ull;
+    NameStream s{1234, 666};
+    name_step(&s);
+    CHECK(s.lo == static_cast<uint32_t>(1234 * kMul + 666) && s.hi == static_cast<uint32_t>((1234 * kMul + 666) >> 32));
+    NameStream a{77, 666}, b{77, 666}, c{5, 666};
+    CHECK(name_pick(&a, 64) == ((77 * kMul + 666) & 63));
+    CHECK(name_pick(&b, 100) == static_cast<uint32_t>(77 * kMul + 666) % 100);
+    CHECK(name_pick(&c, 0) == 0 && c.lo == 5 && c.hi == 666);
+    const uint64_t counts[3] = {125, 120, 85};
+    int with = 0;
+    for (uint32_t seed = 0; seed < 4000; ++seed) {
+      const UniquePicks p = unique_picks(static_cast<uint16_t>(seed), 666, counts, 100, 50);
+      uint32_t lo = seed, hi = 666;
+      const auto step = [&lo, &hi] {
+        const uint64_t t = static_cast<uint64_t>(lo) * kMul + hi;
+        lo = static_cast<uint32_t>(t);
+        hi = static_cast<uint32_t>(t >> 32);
+      };
+      step();
+      const uint64_t prefix = lo % 125;
+      step();
+      const uint64_t suffix = lo % 120;
+      step();
+      const bool app = lo % 100 < 50;
+      uint64_t appellation = 0;
+      if (app) {
+        step();
+        appellation = lo % 85;
+      }
+      CHECK(p.prefix == prefix && p.suffix == suffix && p.has_appellation == app && p.appellation == appellation);
+      with += app ? 1 : 0;
+    }
+    CHECK(with > 1800 && with < 2200);  // the coin is an even one
+  }
+  {
+    // A champion's type: its naming mod's entry (16 champion, 36 ghostly, 37 fanatic, 38 possessed), the last (39
+    // berserk) for any other naming mod and for none; the last naming mod wins, and a 0 ends the mods.
+    const int types[5] = {16, 36, 37, 38, 39};
+    const int naming[2] = {1, 12};
+    const uint8_t ghostly[9] = {36, 0};
+    const uint8_t berserk[9] = {39, 5, 0};
+    const uint8_t none[9] = {5, 6, 0};
+    const uint8_t two[9] = {16, 7, 38, 0};
+    const uint8_t after[9] = {37, 12, 0};
+    const uint8_t ended[9] = {0, 36};
+    CHECK(champion_type(ghostly, 9, types, 5, naming, 2) == 1);
+    CHECK(champion_type(berserk, 9, types, 5, naming, 2) == 4);
+    CHECK(champion_type(none, 9, types, 5, naming, 2) == 4);
+    CHECK(champion_type(two, 9, types, 5, naming, 2) == 3);
+    CHECK(champion_type(after, 9, types, 5, naming, 2) == 4);
+    CHECK(champion_type(ended, 9, types, 5, naming, 2) == 4);
+    CHECK(champion_type(ghostly, 9, types, 0, naming, 2) == -1);
+  }
+
   if (g_failures) {
     std::printf("test_mapmarks: %d failure(s)\n", g_failures);
     return 1;

@@ -154,7 +154,21 @@ loader is the injection point every runtime mod uses).
   called as the routine calls it, the class against the item type's row and, for a hireling, its Hireling row: reads
   of the game's data tables). Nothing written. When a switch changes in a game, the tick has the game work that unit's
   items out again with the cube's refresh (0x470C90), the mercenary found by the server's lookup of a player's pet of
-  a type (0x4FF1A0, the one its handlers of the mercenary's gear ask).
+  a type (0x4FF1A0, the one its handlers of the mercenary's gear ask). Approved 2026-10-03 for the experience
+  multiplier at a kill's full worth (asked as "the experience boost to 1000x still doesn't feel like it's really that
+  high, I wonder if we're hitting some sort of cap that we need to look at"; Joshua chose both of the game's reductions
+  skipped): two hooks, on the server thread: the kill's experience for one receiver (0x44ECE0; the kill experience
+  routine's three calls are its only callers), which for the local player or its mercenary under the multiplier calls
+  its original with the monster's level taken to be the receiver's own (the level penalty then hands the whole amount
+  back) and marks the thread for the length of that call; and the ExpRatio getter (0x3009D0; both its calls are in
+  that routine), which while the mark is up answers the whole ratio (2 to the power its level 0 gives). Nothing is
+  called but the originals, nothing written. Approved the same day for named enemies on the map (asked as "the cheat
+  for showing named still requires us to get close for them to show up, which is unacceptable"; Joshua chose "Fill and
+  read"): under its switch the landmarks' room fill (the game's CreateActiveRoom on the server for an area's rooms not
+  built yet, filled by the game's own pass) for every area but a town, then reads of the server's monsters in those
+  rooms on the server thread (their kind, class, place, name seed, mods, super unique row, a Herald's tier stat through
+  the stat helpers); their names worked out from the game's tables and strings as the client's naming handler works
+  them out. No hook, nothing written, no routine called but the room build already approved.
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -192,7 +206,8 @@ src/sites.*           signature table + resolver over the decrypted image; deriv
 src/game.*            typed wrappers over the stat helpers, unit readers (guarded), local-player identity, the
                       antidote's state cure
 src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, freeze/poison), kill decision, death
-                      penalties, mana cost, exp (the player's award and the mercenary's), item use (should-remove
+                      penalties, mana cost, exp (the player's award and the mercenary's; a kill's worth for one
+                      receiver and the ExpRatio getter it asks: a kill at its full worth), item use (should-remove
                       predicate, tome quantity), key use, item
                       wear (a hit's, Impale's), item name (item level), the drop core, the quality step, the
                       property roll, the class item skill step, the superior step's test of a kind, the magic,
@@ -281,11 +296,16 @@ src/mapmarks.*        named enemies, landmarks and area names at exits on the ma
                       its warp links and its edges with other areas' rooms, walked over its collision map, for the
                       exits), and the hook on the automap's draw of one unit (a named enemy's red cross and name, its
                       mark kept where it was last drawn, the spawn spots, the exits' names of the player's area); the
-                      rules are in the header (tests/test_mapmarks.cpp)
-src/roomfill.*        the shrines the game rolls, for the landmarks: an area entered (server thread, the tick), its rooms
-                      built for the game's own fill pass to fill, a few a frame; then the objects in them read and
-                      handed to mapmarks, which puts those with an icon on the automap (UI thread); each area once a
-                      game, only those whose object groups can roll an object with an icon
+                      named enemies the server has made in an area entered (roomfill.cpp hands them over, server
+                      thread), named as the client names them, marked at the automap's next draw; the rules (the
+                      game's name formatter, a random unique's name stream, a champion's type) are in the header
+                      (tests/test_mapmarks.cpp)
+src/roomfill.*        the shrines the game rolls, for the landmarks, and the named enemies: an area entered (server
+                      thread, the tick), its rooms built for the game's own fill pass to fill, a few a frame; then the
+                      objects in them read and handed to mapmarks, which puts those with an icon on the automap (UI
+                      thread), and the monsters, whose named ones it marks; each area once a game (the landmarks: only
+                      those whose object groups can roll an object with an icon; the named enemies: every area but a
+                      town, its monsters read again each time it is entered)
 src/remember.*        the automap and the two Show Items keys kept between games: read while playing (when a key,
                       a button or a panel says so), put back at a load by pressing the keys through the key-action
                       table (UI thread, no hook); what a cinematic of the game's does to the automap not recorded,
@@ -410,6 +430,15 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | 0x34B9D0 | | (unit) -> the unit type (so nonzero for non-players; used by Consume, AddExperience) |
 | hireling experience award | 0x44F480 | (game, player, hireling, the hireling's level, amount; the fifth argument on the stack): nothing for an amount <= 0 or a hireling in none of the player's pet lists (0x4FF2D0 by its id), or whose hireling record (0x3965D0) is missing; only while its level is below the player's (GetUnitStat 12) and below max level - 1 (0x300C70: at 98 nothing is written); the amount doubled into the 32-bit experience total (GetUnitBaseStat 13, `lea ebp, [rax + rbx*2]`, SetUnitStat with **no cap of the total**), the client told (0x47BED0), the new level walked up the hireling record's exp curve (0x3C1AC0, record +0x20) and set (0x544F60, then 0x545530, unit event 0x62, the level-up event 0xC via 0x5881E0). Three callers, all in the kill exp region (0x44A565 / 0x44A7C8 / 0x44A980): the amount from 0x44ECE0 with the hireling's level, x 86/256 when the killer is not the hireling itself. The level set (0x544F60) clamps nothing: it writes the level the walk reached. Hooked: experience multiplier (the mercenary's gains; the scaled amount kept below half the room, as the writer doubles it, and at the callers' ceiling 0x7FFFFF, so one award bursts a few levels at most) |
 | 0x544F60 / 0x544AC0 | | hireling level set (not the player) |
+| kill experience routine | 0x44A3B0 | (game, killer, monster), from the kill handler 0x588B00 (one caller): the monster's experience (its base stat 13), a monster killer's owner; the player's mercenary (0x4FF1A0, pet type 7) gets the kill's worth below with its level, x 86/256 unless it killed, and the hireling award; a party within reach (0x506F90) shares by levels (89/256 more a member), else the killer alone: the worth below with its level and the monster's (base stat 12), then PLAYER_AddExperience. Read |
+| a kill's worth for one receiver | 0x44ECE0 | (game, receiver, its level, the monster's level, the monster's experience (the fifth argument, on the stack)) -> the gain: the experience capped at 0x7FFFFF (1 for none); 0 at the class's top level (0x300C70); the level penalty 0x44FEF0 (receiver's level, monster's, amount); times the receiver's level's ExpRatio (0x3009D0) >> the level-0 one (the shift, 10); plus stat 85 (item_addexperience) percent; a hireling's at most (curve(L + 1) - curve(L)) >> 6 (its pet node 0x4FF2D0, the Hireling record 0x3965D0 by its level, the curve 0x3C1AC0 = Exp/Lvl x L^2 x (L + 1)). The kill experience routine's three calls are its only callers. Hooked: experience multiplier (a kill's full worth: the monster's level taken to be the receiver's, the ratio whole) |
+| level penalty | 0x44FEF0 | (receiver's level, monster's level, amount) -> amount: a receiver at or above the monster x table[min(diff, 10)] / 256 (0x1D1AC38: 256 to five levels, then 207, 159, 110, 61, 13: 81 / 62 / 43 / 24 / 5 %), 256 handing the amount back as it is; a monster above: a receiver above 24 x its level / the monster's (0x44A0B0), else 0x1D1AC68 (256 to five, then 225, 174, 92, 38, 5). One caller (0x44ECE0). Read (two equal levels: the whole amount) |
+| ExpRatio of a level | 0x3009D0 | (u8 bank, level) -> experience.txt's ExpRatio: the data tables' +0x14E0 rows (0x24 bytes: eight classes' totals, the ratio at +0x20; level n the row n + 1), level 0 or below the MaxLvl row's (10, the shift): 1024 to level 69, 976 at 70, 496 at 80, 256 at 85, 61 at 90, 15 at 95, 8 at 97, 6 at 98, 5 at 99. Both its calls are in 0x44ECE0. Hooked: experience multiplier (the whole ratio while the kill's worth is asked for you or your mercenary) |
+| level up | 0x52DA30 | (game, player): the level the experience comes to (0x300BC0) set with nextexp, and for the levels gained (any number at once) stat and skill points, life, mana and stamina by the CharStats row. Read |
+| client: a monster named | 0x1DE620 | the naming handler (unit, mod, unique) the client's mod table (0x235AE80, a pointer a mod) gives mods 1 rndname, 12 bloodraven, 16 champion and 36 .. 39 ghostly, fanatic, possessed, berserk; its mod loop 0x1DF980 (also run at packet 0x57, 0x1DF5A0) runs the base mods first (0x1CDD570: 1 .. 4) and then each of the monster's (monster data +0x20, nine bytes, a 0 ends them, 0x38E310). Nothing without the unique bit. A Herald (kind 0x200): the string of key "HeraldName" + its stat 367 ("HeraldName1" when none: Fright, Dread, Fear, Horror, Terror); a super unique: its SuperUniques row's string (+0x02; 0x1506 "an evil force" when 0); a champion (0x1A5C10: kind 4): format 0x2B40 (strChampionFormatXp, '%0 %1') with the string of the champion table (0x1CDD4F0, {int32 mod, int32 string}: 16 Champion, 36 Ghostly, 37 Fanatic, 38 Possessed; the fifth, 39 Berserker, taken for any mod not among the four) and the MonStats name (+0x36): the last naming mod's call wins; else mod 12 Blood Raven's string, a boss class of a fixed map (156, 211, 242, 243, 256, 333, 544, 704 .. 709) its own, and a random unique: the unit's RNG (+0x28) seeded {lo the name seed (monster data +0x18), hi 666} (0x367110), a prefix (0x396E80) and a suffix (0x396E90), a step and lo % 100 below 50 for an appellation (0x396D40) with format 0x6BA (Monster2Format '%0 %1 %2'), else 0x6B9 (Monster1Format '%0 %1'). The ids go into the client's monster data +0x32 .. +0x38 (0x3AF460; 0x3AF500 a single string), the text is composed by 0x985A0 (strings by id, the formatter 0x3ADCA0) into +0x40, which the client's unit name getter 0x9A1B0 hands out. Read: named enemies (the server's monsters named alike) |
+| unique name lists | 0x396D50 | (u8 bank, unit, list: 0 prefix (0x396E80), 1 suffix (0x396E90), 2 appellation (0x396D40)) -> a string id: the bank's data tables +0x1950 + list x 0x18, {u16* ids, u64 count} (3.3: 53, 69 and 25, uniqueprefix / uniquesuffix / uniqueappellation.txt), one step of the unit's RNG and lo % count (& (count - 1) for a power of two), no step for an empty list. Read (checked against mapmarks.h's stream in a harness running it: 28,089 seeds) |
+| name formatter | 0x3ADCA0 | (char out[0x400], format, args ..., 0): a header up to ':' when there is one, its 'a' and 'n' each with an argument's digit: the noun's grammar tag (its first four characters when it starts with '['; "[ms]" when not) picks the adjective's form (the text after that tag up to the next '['; an adjective that does not start with '[' stays), and the noun loses the tag; a noun alone loses four characters, an adjective alone takes its [ms] form. Then each "%i" in turn, its first, becomes the i-th argument, a space after it dropped when the text before ends in one. English has no header; German and French 'a0n1:'. Read (mapmarks.h format_name; the game's own run on 52,000 cases of the 13 languages' formats and name parts gives the same) |
+| a monster's name seed | 0x38E7B0 | (monster, u16) -> monster data +0x18: the server draws it as a monster is made (0x495240: a step of the unit's RNG, its low 16 bits), a pack's maker (0x49AF30) gives its unique its own; the client takes it from the monster packet (0x98FA0) and packet 0x57 (0x12CE00: +1 the id, +5 kind 1 (+8 the flags, +0xC champion) or 2 (+8 the flags, +0xE the count, +0xF the mods), +6 the seed). The server's monster data +0x30 is its AI record, where the client's keeps the name's string ids. Read: named enemies |
 | 0x550C20 | | level-up-by-chunks utility (console/cheat path), not the award |
 | DesecrateGetCurrentScheduledZone | 0x35B380 | (bool* changed) -> zone record or 0: `_time64`, config for now, slot = (now - start) / ((duration + break) * 60), index from a seeded weighted pick (0x35C6B0, cached per slot), record = zones + index * 1000. Also called with 0 by the server at a game's join (0x483D0A, then apply kind 1). Called: all areas terrorized (switched off, the rotation's zone applied again) |
 | DesecrateGetConfigForTime | 0x35DB10 | (int64 utc, bool* changed) -> config record: +0 start, +0x10 duration min, +0x14 break min, +0x20 seed, +0x250 zones, +0x258 count; +0x18 / +0x1C the manual thresholds (deprioritize / removal), +0x268 the manual zone groups, +0x270 their count; records 0x298 apart in the loaded list (globals 0x2A9AE78/80). Called: all areas terrorized |
@@ -1112,6 +1141,51 @@ Why god mode had failed (until 2026-09-30): it held the game's players' no-damag
 remembered, and D2RCore clears that switch at every game's load (the record: no-damage switches), so from a
 session's second game on it was the tick's refill of life and FinalizeDamage's undo of a kill.
 
+Experience at a kill's full worth (2026-10-03; asked as "the experience boost to 1000x still doesn't feel like it's
+really that high, I wonder if we're hitting some sort of cap"). Nothing capped the multiplier: PLAYER_AddExperience
+caps only the total (at level 99's) and the level up takes any number of levels at once. But what a kill gives a
+receiver is worked out first (0x44ECE0): the monster's experience less the level penalty (81 / 62 / 43 / 24 / 5 % from
+six to ten levels above the monster; Hell's areas end at 85), times experience.txt's ExpRatio (all of it to level 69,
+a quarter at 85, 6 % at 90, 0.6 % at 98), plus the item bonus. So at 95 outside a terror zone 1000x came to less than
+a kill's whole worth (all three of Joshua's characters were 99 by then, the mercenary at the top). The kill's worth is
+hooked: for the local player or its mercenary under the multiplier it calls its original with the monster's level
+taken to be the receiver's (the penalty's table gives two equal levels 256 / 256: the amount as it is) and with the
+thread marked; the ratio getter, hooked too, answers 2 to the power of its level-0 shift (1024 / 1024) while the mark
+is up. Everything else is the game's: the 0x7FFFFF cap of a monster's experience, nothing at the class's top level, the
+item bonus, a hireling's cap of 1/64 of its level's span (its writer doubles the award; the hireling hook's own
+ceiling stays), the party split. PLAYER_AddExperience's hook then multiplies the full worth. The first four kills are
+logged with what the game would have given ("experience: a kill counts its full worth for you: N (level L against a
+monster of level M; the game's own reductions would leave K)"); the console's status counts them. sites.cpp checks
+that the routine asks the penalty with its third and fourth arguments, that the penalty's first table entry is the
+whole amount, and that both its ratio calls are the getter found; else the multiplier scales the game's own amount.
+
+Named enemies read ahead (2026-10-03; asked as "the cheat for showing named still requires us to get close for them to
+show up, which is unacceptable"). A random unique, a champion and a Herald exist nowhere before the server fills their
+room (its random monsters, 0x503790, made with the room's own seed when the fill pass first fills it), and the client
+knows only the monsters of the rooms near its player. So under the switch roomfill.cpp fills every area but a town as
+it is entered (the landmarks' mechanism: the server's rooms built, a few a frame, for the game's own fill pass, which
+populates them with no look at the players; a far room's monsters then wait where they stand, as the server updates
+only the rooms near a player), and reads the monsters in the area's built rooms: every live one that is named by the
+map's rule (no minion, no NPC, none of the local player's pets) is handed to mapmarks with its place and its name. The
+name is the one the client's naming handler gives it, worked out from the server's copy, which carries what the client
+is sent (the record: client: a monster named): a Herald's "HeraldName" + its tier stat, a super unique's row, a
+champion's type by its mods and its monster's name in the champion format, a random unique's prefix, suffix and on a
+coin appellation picked from its name seed in the game's three lists (the bank's data tables), composed with the
+game's formatter (mapmarks.h format_name; grammar tags as the game resolves them in German, French and the rest). A
+boss by its row, and anything the handler does not name, has its monster's name. The marks wait under the marks' lock
+for the automap's next draw, which knows the level's layer (0x32C200), and take over a layout spot of the same name;
+when the client draws the monster itself its place and its name are the client's from then on (a name worked out
+otherwise is a warning, "named enemies: monster class N (kind K) was marked ahead as "A", and the client names it
+"B"", counted in the console's status). An area entered again is read again: a monster no longer among its area's
+(killed, or gone) loses its mark, unless the client draws it now; a monster seen dead is kept off by its id. Not
+covered: what the game makes only at an event (the Chaos Sanctuary's seal bosses, spawned as a seal is opened, and
+Diablo; Baal's waves): it does not exist before. sites.cpp reads all of it from the naming handler and its mod loop,
+the picker and the seed routine (NameFacts; the champion table checked to be the handler's own mods). Checked without
+the game (scratchpad harness/, 2026-10-03): the facts over the dump (seed +0x18, mods +0x20, super row +0x2A, five
+champion types, formats 1721 / 1722 / 11072, lists at +0x1950, 0x18 apart); the game's own formatter against
+format_name on 52,000 cases of every language's real formats and name parts, none off; the game's own picker with the
+handler's coin against unique_picks on 28,089 seeds over three sets of list sizes, none off.
+
 Damage cheats (all in the ExecuteEvents hook, before the original): the damage multiplier scales a hit whose
 attacker is the local player or a monster it owns and whose defender is someone else's monster - the damage types
 when computeTotals is 1 (resistances then apply to the scaled amounts), the life total when 0, and the per-frame
@@ -1810,7 +1884,15 @@ pass changes nothing.
    exp: kill at 1x then 10x and at 1000x and compare the Status note ("Experience: N x 1000.00 = M"); with a
    mercenary along its gains are scaled too ("Experience: your mercenary's N x ...") and its level chases yours (a
    big kill can put it a few levels ahead, where it stops gaining until you pass it: the game's own gate); the
-   console status reads "exp=x1000.0 (N gains scaled, M the mercenary's)";
+   console status reads "exp=x1000.0 (N gains scaled, M the mercenary's; K kills at their full worth)". A kill's
+   full worth (log: "sites: kill experience: what a kill gives one receiver 0x44ECE0 / experience: a level's high-level
+   ratio (ExpRatio) 0x3009D0" hits=1 each, "sites: kill experience its level penalty gives two equal levels the whole
+   amount ...", "hooks: experience ratio hooked at 0x3009D0", "hooks: kill experience hooked at 0x44ECE0", "hooks: the
+   experience multiplier counts a kill at its full worth ..."): a new character, or one past level 80, at 1000x: the
+   first four kills say "experience: a kill counts its full worth for you: N (level L against a monster of level M; the
+   game's own reductions would leave K)", K far below N past level 70 or against monsters far below you; levels come as
+   fast at 90 as at 50 (a few kills of Hell monsters a level), and a monster ten or more levels below you gives its
+   whole worth times the multiplier, not 5 % of it; at 99 nothing is gained (the game's own);
    exit before death: potion, "armed", lethal hit ->
    character screen, no death counted; settings persist across restarts. Movement speed across games, without
    closing the game in between: 100, Save and Exit, load a character: as fast at once ("movement speed: base
@@ -2333,14 +2415,24 @@ pass changes nothing.
    class 58, kind 0xA) drawn on the map"), one cross, not two. Walk away without killing him: his cross stays where he
    was last seen, however far you go (zoom the map out, or go to the next area of the same map). Kill him: his cross
    goes and does not come back in this game ("named enemies: Bishibosh (level 3) seen dead - its mark is let go for
-   this game"); a new game marks it again. A random unique (a gold-named pack leader) gets a red cross with its whole
-   name once you have come near enough for the game to make its pack, and keeps it after you leave, until it dies;
-   its minions get nothing. A champion pack: a red cross on each, the monster's name once, in blue. Andariel's, Duriel's, the Summoner's, Izual's, the Countess's, Pindleskin's,
+   this game"); a new game marks it again. Read ahead (log: "sites: client: a monster named (its naming mods) 0x1DE620
+   hits=1", "sites: monster names a monster's name seed at its data +0x18, its mods at +0x20, its super unique row at
+   +0x2A; a Herald "HeraldName" N by stat 367 ...", "landmarks: ...; named enemies are read from the server's side as an
+   area is entered ..."): entering an area, within a second or two every random unique (a gold name), champion pack (the
+   monster's name once, in blue: "Ghostly Fallen", "Berserker ..."), super unique and boss of the whole area has its red
+   cross and name, however far ("named enemies: level N: R rooms built ahead for the game to fill ..., K monsters in the
+   area, J of them named", then "named enemies: level N (layer L): J named enemies of the server's on the map (J new, 0
+   gone)"). Walk to one: the name is the hover's (no warning "... was marked ahead as ..."; one is a name worked out
+   wrong: send the log); its minions get nothing. Kill one and leave: its cross goes; come back: the area's others are
+   still marked ("named enemies: level N entered again: ..."). A terror zone's Heralds as they come with kills (the
+   area read again as you enter it). Not ahead: the Chaos Sanctuary's seal bosses and Diablo, Baal's waves (made at
+   their event). Andariel's, Duriel's, the Summoner's, Izual's, the Countess's, Pindleskin's,
    Nihlathak's and the Ancients' spawn spots are marked when you enter their areas; in a terror zone a Herald gets a
    cross. Town folk keep the game's own white crosses, your mercenary and summons theirs (no red ones). The names are
    drawn even with the game's own automap names option off. Switch it off: the crosses go at once. The console:
-   `cabbycodes enemies on|off` and the status line "map: ...; enemies=1, N spawn spots read, M named enemies drawn (J
-   of them on the map now), K marks let go as their monster died". `cabbycodes perf` with the automap open in a fight: "automap unit (each)"
+   `cabbycodes enemies on|off` and the status line "map: ...; enemies=1, N spawn spots read, A named enemies read ahead
+   from the server (0 names worked out otherwise than the client's), M drawn by the client (J marks on the map now), K
+   marks let go as their monster died". `cabbycodes perf` with the automap open in a fight: "automap unit (each)"
    well under a microsecond. Should the game stop when the automap opens, send d2rloader.log.
 39. Area names at exits (log: "sites: collision: a subtile's flags in its room's map 0x366250 / DRLG: a warp tile's preset
    unit 0x3F4670" hits=1 each, "sites: map: area names at exits a built room's own preset units at +0x98; its near
@@ -2370,8 +2462,9 @@ pass changes nothing.
    already, 0 could not be), filled in T ms; K objects in the area, J with an icon handed to the map", then "landmarks:
    level 100: J objects the game rolled as it filled the area's rooms on the map (J new)"). Walk to one: it is there,
    and taking it works as always (a health shrine heals). The same in Level 2, Act 3's jungle and Kurast, Travincal,
-   Act 4's areas, Act 5's (its outdoor waypoints too), the dungeons of every act. Act 1's and Act 2's outdoor areas and
-   the towns: no such line (nothing they roll has an icon). The monsters are where the game put them; the fight goes as
+   Act 4's areas, Act 5's (its outdoor waypoints too), the dungeons of every act. With Named enemies on the map off,
+   Act 1's and Act 2's outdoor areas and the towns: no such line (nothing they roll has an icon); with it on, every
+   area but a town is filled for it (the line begins "named enemies:" where no landmark is rolled). The monsters are where the game put them; the fight goes as
    always. No hitch on entering an area (`cabbycodes perf` while entering: "rooms built ahead" a few ms at the most in
    a frame). The console's status line "map: landmarks=1, ..., N areas filled ahead (R rooms built for the game to
    fill) and K of the objects it rolled put on". A warning "sites: the game's room fill pass is not made the way

@@ -599,11 +599,11 @@ bool is_online() { return g_is_online ? g_is_online() : false; }
 
 void set_current_level(int id) { InterlockedExchange(&g_level, id); }
 int current_level() { return g_level; }
-bool in_town() {
+bool town_level(int level) {
   // Rogue Encampment, Lut Gholein, Kurast Docks, the Pandemonium Fortress, Harrogath.
-  const int level = current_level();
   return level == 1 || level == 40 || level == 75 || level == 103 || level == 109;
 }
+bool in_town() { return town_level(current_level()); }
 
 bool has_client_units() { return sites::derived(sites::dClientUnitTable) && sites::unit_next_offset(); }
 

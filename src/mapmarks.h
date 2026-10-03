@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace d2rcc::game {
@@ -38,11 +40,13 @@ struct Unit;
 // for a pack), and keeps a mark of it; and, at the local
 // player's own call (once a draw), every mark on the automap's layer whose monster it does not draw itself now, however
 // far: the spawn spots of the super uniques and bosses the layout of the areas entered places (preset units, read as the
-// landmarks are), and the named monsters drawn before, where they were last drawn - the game stops a monster far from
-// every player, so that is where it still is. A random unique or a Herald is made only as its room is first filled,
-// when a player comes near (the server's room population, 0x503790): before that nothing knows of it. A mark goes for
-// good once its monster is seen dead. The game's own calls do the drawing: the transform to the automap's screen, the
-// marker, the name. Nothing is written.
+// landmarks are), the named monsters drawn before, where they were last drawn - the game stops a monster far from every
+// player, so that is where it still is -, and every named monster of an area entered as the server has made it. A random
+// unique, a champion or a Herald is made only as its room is first filled (the server's room population, 0x503790), so
+// roomfill.cpp has the game fill an area's rooms as the character enters it and reads the monsters in them: the named
+// ones are marked where they stand, with the name the client would give them (monsters_found). A mark goes for good once
+// its monster is seen dead, and a monster no longer among its area's at the area's next read loses its mark. The game's
+// own calls do the drawing: the transform to the automap's screen, the marker, the name. Nothing is written.
 //
 // Area names at exits. Building a room links it to the rooms of the areas next to it (its near links, 0x3608A0): the
 // rooms of another area that its flags say it borders are put among its near rooms, and a warp (a cave's entrance, a
@@ -82,6 +86,120 @@ constexpr bool named(uint16_t kind, bool is_boss_row) {
 }
 // A champion: the client gives it the unique bit as well (its kind is 0xD), so it is asked first.
 constexpr bool champion(uint16_t kind) { return (kind & kKindChampion) != 0 && (kind & kKindSuperUnique) == 0; }
+
+// --- The names of named enemies the server has made (read ahead, before the client knows them) ----------------------
+//
+// The client names a monster in the handler its naming mods run (0x1DE620, sites::NameFacts), into string ids it keeps
+// in the monster's data, and composes the text as it shows it (0x985A0): a Herald (kind 0x200) by the string of
+// "HeraldName" and its tier's stat; a super unique (kind 2) by its row's string; a champion by the champion format with
+// its type (the string its table gives the naming mod) and its monster's name; a random unique by its name seed: a
+// stream {lo the seed, hi a constant}, a prefix and a suffix picked, and on a coin an appellation (two formats). The
+// server's monster carries what the client is sent for it (its kind, its super unique row, its mods, its name seed), so
+// the same name is worked out from it.
+
+// The game's name formatter (0x3ADCA0): a format of "%0" .. "%9", in some languages after a header ending in ':' whose
+// 'a' and 'n' each name an argument by the digit after them: an adjective to agree with a noun. A noun that starts with a
+// grammar tag ("[fs]", its first four characters; "[ms]" when it has none) loses it, and the adjective's form of that
+// tag (the text after the tag up to the next '[') is taken when the adjective starts with a '['. With a noun alone it
+// loses its first four characters; with an adjective alone its "[ms]" form is taken. Then each "%i" in turn (the first of
+// it) becomes the i-th argument, and a space after it is dropped when what comes before ends in one.
+inline std::string format_name(const char* format, const std::vector<std::string>& args) {
+  if (!format) return {};
+  std::vector<std::string> slot(args);
+  const auto valid = [&slot](int i) { return i >= 0 && i < static_cast<int>(slot.size()); };
+  const auto drop4 = [](std::string& s) { s = s.size() > 4 ? s.substr(4) : std::string(); };
+  const auto take_form = [](std::string& adjective, const std::string& tag) {
+    const size_t at = adjective.find(tag);
+    if (at == std::string::npos) return;
+    const size_t from = at + tag.size(), end = adjective.find('[', from);
+    adjective = adjective.substr(from, end == std::string::npos ? std::string::npos : end - from);
+  };
+  const char* colon = std::strchr(format, ':');
+  if (colon) {
+    const char* pa = std::strchr(format, 'a');
+    const char* pn = std::strchr(format, 'n');
+    const int a = pa && pa < colon ? pa[1] - '0' : -1;
+    const int n = pn && pn < colon ? pn[1] - '0' : -1;
+    if (a == -1) {
+      if (valid(n)) drop4(slot[static_cast<size_t>(n)]);
+    } else if (n == -1) {
+      if (valid(a)) take_form(slot[static_cast<size_t>(a)], "[ms]");
+    } else {
+      std::string tag = "[ms]";
+      if (valid(n) && !slot[static_cast<size_t>(n)].empty() && slot[static_cast<size_t>(n)][0] == '[') {
+        tag = slot[static_cast<size_t>(n)].substr(0, 4);
+        drop4(slot[static_cast<size_t>(n)]);
+      }
+      if (valid(a) && !slot[static_cast<size_t>(a)].empty() && slot[static_cast<size_t>(a)][0] == '[')
+        take_form(slot[static_cast<size_t>(a)], tag);
+    }
+  }
+  std::string text = colon ? std::string(colon + 1) : std::string(format);
+  for (size_t i = 0; i < slot.size() && i < 10; ++i) {
+    const char mark[3] = {'%', static_cast<char>('0' + i), 0};
+    const size_t at = text.find(mark);
+    if (at == std::string::npos) continue;
+    std::string out = text.substr(0, at) + slot[i];
+    size_t rest = at + 2;
+    if (!out.empty() && out.back() == ' ' && rest < text.size() && text[rest] == ' ') ++rest;
+    text = out + text.substr(rest);
+  }
+  return text;
+}
+
+// A random unique's name stream: the game's RNG (lo * 0x6AC690C5 + hi: lo the low half, hi the high) from {lo the name
+// seed, hi a constant}. A pick (the picker 0x396D50) is a step and the index lo % count (lo & (count - 1) for a power of
+// two), and no step for an empty list; the coin for the appellation is a step and lo % coin_mod below coin_below.
+struct NameStream {
+  uint32_t lo = 0, hi = 0;
+};
+inline void name_step(NameStream* s) {
+  const uint64_t t = static_cast<uint64_t>(s->lo) * 0x6AC690C5ull + s->hi;
+  s->lo = static_cast<uint32_t>(t);
+  s->hi = static_cast<uint32_t>(t >> 32);
+}
+inline uint64_t name_pick(NameStream* s, uint64_t count) {
+  if (count == 0 || count > 0x7FFFFFFF) return 0;
+  name_step(s);
+  const uint32_t n = static_cast<uint32_t>(count);
+  return (n & (n - 1)) == 0 ? (s->lo & (n - 1)) : (s->lo % n);
+}
+struct UniquePicks {
+  uint64_t prefix = 0, suffix = 0, appellation = 0;
+  bool has_appellation = false;
+};
+// counts: the prefixes', the suffixes' and the appellations' lists.
+inline UniquePicks unique_picks(uint16_t seed, uint32_t hi, const uint64_t counts[3], uint32_t coin_mod,
+                                uint32_t coin_below) {
+  NameStream s{seed, hi};
+  UniquePicks p;
+  p.prefix = name_pick(&s, counts[0]);
+  p.suffix = name_pick(&s, counts[1]);
+  name_step(&s);
+  p.has_appellation = coin_mod && s.lo % coin_mod < coin_below;
+  if (p.has_appellation) p.appellation = name_pick(&s, counts[2]);
+  return p;
+}
+
+// A champion's type: the handler runs for the base mods first (the first a naming one) and then for each of the
+// monster's mods that names it, and the last call names it: the entry of the champion table whose mod it is (all but
+// the last entry are compared), else the last entry's. `naming` lists the other naming mods (the base one, Blood
+// Raven's), which leave the last entry too. Returns the entry's index.
+inline int champion_type(const uint8_t* mods, int mod_count, const int* type_mods, int types, const int* naming,
+                         int naming_count) {
+  if (types <= 0) return -1;
+  int type = types - 1;
+  for (int i = 0; i < mod_count && mods[i]; ++i) {
+    bool names = false;
+    for (int k = 0; k < naming_count && !names; ++k) names = mods[i] == naming[k];
+    for (int k = 0; k < types && !names; ++k) names = mods[i] == type_mods[k];
+    if (!names) continue;
+    type = types - 1;
+    for (int k = 0; k + 1 < types; ++k)
+      if (mods[i] == type_mods[k]) type = k;
+  }
+  return type;
+}
 
 // A preset unit of a room's layout: +0x20 its type (1 a monster, 2 an object, 5 a warp tile), +0x04 its class, +0x08 /
 // +0x24 its place, +0x10 the next. A monster's class is a MonStats row below the table's count; from there on a super
@@ -307,6 +425,13 @@ int objects_found(uint8_t bank, int level, const PlacedObject* objects, size_t c
 bool found_waiting();
 void put_found(uint64_t now_ms);
 
+// The named enemies the server has made in the rooms of an area (the server thread, roomfill.cpp, as the character
+// enters it once its rooms are filled: every monster that stands in them, alive): those that are named are marked where
+// they stand with the name the client would give them, and the area's earlier marks of the server's monsters that are
+// not among them go (they died or left it). Returns how many are named. The marks are put on the automap's layer of their
+// level at its next draw (the UI thread).
+int monsters_found(uint8_t bank, int level, Unit* const* monsters, size_t count);
+
 // Game thread (the tick): the Objects, MonStats, SuperUniques and Levels rows the two read, and the names, per table
 // bank. Once a bank is read it is kept.
 void collect();
@@ -338,6 +463,8 @@ struct Stats {
   unsigned borders = 0;    // ... their openings into the next area named
   unsigned exits = 0;      // exits on the map now
   unsigned rolled = 0;     // objects the game rolled ahead put on the map (shrines, wells ...)
+  unsigned ahead = 0;      // named enemies read from the server's side as their areas were entered (each once a game)
+  unsigned names_off = 0;  // ... whose name worked out was not the one the client gave them when it drew them
 };
 Stats stats();
 

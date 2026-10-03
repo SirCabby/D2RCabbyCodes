@@ -116,6 +116,7 @@ struct Status {
   unsigned lethal_hits = 0;    // exit before death: hits held at 1 life
   unsigned exp_awards = 0;      // experience gains scaled
   unsigned exp_awards_merc = 0;  // ... of them the mercenary's own
+  unsigned exp_full = 0;        // kills counted at their full worth (you and your mercenary)
   unsigned hits_scaled = 0;    // damage multiplier: hits by you or your minions scaled
   unsigned pet_hits = 0;       // invincible mercenary / minions: hits taken away
   unsigned effects_blocked = 0;  // cannot be frozen / poisoned: hits that would have

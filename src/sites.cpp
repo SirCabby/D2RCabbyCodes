@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <vector>
 
@@ -591,6 +592,25 @@ const Spec kSpecs[kCount] = {
      "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 30 4C 8B F1 49 63 F8 48 8B CA 41 8B D9 "
      "E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 41 0F B6 8E 06 01 00 00 E8 ?? ?? ?? ?? 48 8B B0 E0 12 00 00",
      0, 0x4FF1A0},
+    // The kill's experience for one receiver: the receiver's level kept in r15d and the monster's in edi, the monster's
+    // experience (the fifth argument, [rsp+60h] past the pushes) capped at 0x7FFFFF, and 1 answered for none.
+    {kKillExperience, "kill experience: what a kill gives one receiver",
+     "48 89 5C 24 18 48 89 7C 24 20 41 55 41 56 41 57 48 83 EC 20 BB FF FF 7F 00 41 8B F9 39 5C 24 60 45 8B F8 4C 8B F2 "
+     "4C 8B E9 0F 4E 5C 24 60 85 DB 7F ?? B8 01 00 00 00 E9",
+     0, 0x44ECE0},
+    // ExpRatio of a level: the bank's data tables (`lea rbx, [array]; add rax, rax; mov rbx, [rbx+rax*8]`), and for level
+    // 0 or below the first row's column (+0x20: experience.txt's MaxLvl row holds the shift).
+    {kExpRatio, "experience: a level's high-level ratio (ExpRatio)",
+     "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 0F B6 F1 48 63 FA 48 89 74 24 40 48 83 FE 04 72 ?? 48 8D 44 24 40 48 "
+     "8D 4C 24 48 48 89 44 24 48 E8 ?? ?? ?? ?? 84 C0 74 01 CC 48 8B 44 24 40 48 8D 1D ?? ?? ?? ?? 48 03 C0 48 8B 1C C3 "
+     "48 83 BB ?? ?? 00 00 00 74 ?? 85 FF 7F ?? 48 8B 83 ?? ?? 00 00 8B 40 20",
+     0, 0x3009D0},
+    // The client's naming handler (the handler its mod table gives the naming mods): nothing without the unique flag
+    // (r8d), the unit in rdi, the mod in esi, the unit's RNG (0x34A1E0) kept in r12.
+    {kMonsterNaming, "client: a monster named (its naming mods)",
+     "45 85 C0 0F 84 ?? ?? ?? ?? 4C 8B DC 55 56 57 49 8D 6B A1 48 81 EC D0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 "
+     "45 2F 49 89 5B 10 8B F2 4D 89 63 18 48 8B F9 4D 89 6B 20 48 89 4D AF E8",
+     0, 0x1DE620},
 };
 
 Result g_results[kCount];
@@ -615,6 +635,8 @@ ReviveFacts g_revive;
 MapFacts g_map;
 FillFacts g_fill;
 RequirementFacts g_requirement;
+bool g_kill_exp_checked = false;
+NameFacts g_names;
 
 // The bytes of an instruction's RIP-relative operand, as an absolute address.
 uintptr_t rip_operand(uintptr_t insn, int disp_at, int len) {
@@ -691,6 +713,8 @@ const ReviveFacts& revive_facts() { return g_revive; }
 const MapFacts& map_facts() { return g_map; }
 const FillFacts& fill_facts() { return g_fill; }
 const RequirementFacts& requirement_facts() { return g_requirement; }
+bool kill_experience_checked() { return g_kill_exp_checked; }
+const NameFacts& name_facts() { return g_names; }
 uintptr_t call_target(Id id) { return call_at(address(id)); }
 
 size_t entry_bytes(Id id, uint8_t* out, size_t capacity) {
@@ -2106,6 +2130,210 @@ void derive() {
                                                            : "the Hireling rows or the client's pet list are not laid "
                                                              "out as expected");
   }
+  // Experience at a kill's full worth. The kill's experience routine keeps the receiver's level in r15d and the
+  // monster's in edi (its signature), and asks the level penalty with them in that order (ecx, edx): with the monster
+  // no higher, the levels between them index a table whose first entry is the whole amount (0x100: the amount handed
+  // back as it is). Then the ratio of the receiver's level and of level 0 (the shift), both from the ratio getter.
+  g_kill_exp_checked = false;
+  if (const uintptr_t kill = address(kKillExperience)) {
+    const uintptr_t penalty_call = find_in(kill, 0xC0, "44 8B C3 48 89 6C 24 40 8B D7 41 8B CF E8");
+    const uintptr_t penalty = penalty_call ? call_at(penalty_call + 13) : 0;
+    const uintptr_t below =
+        penalty ? find_in(penalty, 0x40,
+                          "3B D1 0F 8F ?? ?? ?? ?? 2B CA B8 0A 00 00 00 83 F9 0B 0F 4D C8 48 63 C1 48 8D 0D ?? ?? ?? ?? 48 "
+                          "63 8C 81 ?? ?? ?? ?? 81 F9 00 01 00 00 0F 84")
+                : 0;
+    const uintptr_t ratio_calls = find_in(kill, 0xE0, "41 8B D7 0F B6 CB E8 ?? ?? ?? ?? 33 D2 0F B6 CB 8B E8 E8");
+    const uintptr_t ratio = address(kExpRatio);
+    int32_t disp = 0, whole = 0;
+    const uintptr_t base = below ? rip_operand(below + 24, 3, 7) : 0;
+    const bool same_levels = base && mem::read_safe(below + 35, &disp) &&
+                             mem::read_safe(base + static_cast<uintptr_t>(static_cast<intptr_t>(disp)), &whole) &&
+                             whole == 0x100;
+    const bool ratios = ratio && ratio_calls && call_at(ratio_calls + 6) == ratio && call_at(ratio_calls + 18) == ratio;
+    g_kill_exp_checked = same_levels && ratios;
+    if (!g_kill_exp_checked)
+      log_warn("sites: the kill's experience is not worked out the way expected (%s) - the experience multiplier "
+               "scales what the game gives, after its reductions",
+               !penalty ? "its level penalty" : !same_levels ? "the penalty's table" : "its calls of the ratio");
+  }
+  // The client's names of monsters (its naming handler, run for a monster's naming mods). A Herald (its kind 0x200):
+  // the string of "HeraldName" and the stat it asks, else "HeraldName1". A super unique (kind 2): its row's string
+  // (+0x02), a default when it has none. A champion (kind 4, 0x1A5C10): the champion format with the string its table
+  // gives the mod (compared with all but the last entry, whose string is taken when none is that mod) and the MonStats
+  // name (+0x36). Else, but for the fixed mod (Blood Raven's), the name's stream seeded from the name seed (lo the
+  // seed, hi a constant: 0x367110), a prefix and a suffix picked (one picker, `xor r8d, r8d` / `mov r8d, 1` before a
+  // jump to it), a coin (a step, lo % 100 below 50) for an appellation (`mov r8d, 2`), and the format with two or three.
+  // The picker: one step, lo % count (a power of two: & (count - 1)), the string id at that index of the bank's list,
+  // the lists 0x18 apart in the data tables. The client's mod loop (the handler table's user, right after it in the
+  // image) reads the monster's mods through a getter (monster data + its add), its first four base mods first.
+  g_names = NameFacts{};
+  if (const uintptr_t naming = address(kMonsterNaming)) {
+    NameFacts& f = g_names;
+    constexpr size_t kNamingSpan = 0x500;  // the handler is 0x4B6 bytes long
+    const uintptr_t seed_read = find_in(naming, kNamingSpan, "48 8B 47 10 48 85 C0 74 ?? 0F B7 58 ??");
+    const uintptr_t herald = find_in(naming, kNamingSpan,
+                                     "BA 00 02 00 00 48 8B CF 4C 89 BC 24 C0 00 00 00 E8 ?? ?? ?? ?? 48 8B CF 84 C0 0F 84 "
+                                     "?? ?? ?? ?? 45 33 C0 BA ?? ?? 00 00 E8");
+    const uintptr_t herald_key = find_in(naming, kNamingSpan,
+                                         "BA 0A 00 00 00 48 89 45 DF E8 ?? ?? ?? ?? 48 8B 55 CF F2 0F 10 05 ?? ?? ?? ?? F2 "
+                                         "0F 11 02 0F B7 0D ?? ?? ?? ?? 66 89 4A 08");
+    const uintptr_t herald_default =
+        find_in(naming, kNamingSpan, "48 8D 05 ?? ?? ?? ?? 48 C7 45 C7 ?? 00 00 00 48 8D 4D BF 48 89 45 BF E8");
+    const uintptr_t super = find_in(naming, kNamingSpan,
+                                    "E8 ?? ?? ?? ?? 0F BF D0 41 0F B6 CF E8 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 0F B7 "
+                                    "50 ?? 48 8B CF 66 85 D2 0F 85 ?? ?? ?? ?? BA ?? ?? 00 00 E8");
+    const uintptr_t champion = find_in(naming, kNamingSpan,
+                                       "4C 8D 25 ?? ?? ?? ?? 41 8B DD 49 8B CC 48 8D 05 ?? ?? ?? ?? 0F 1F 00 39 31 74 ?? "
+                                       "FF C3 48 83 C1 08 48 3B C8 7C ?? 41 0F BF D6 41 0F B6 CF E8 ?? ?? ?? ?? 48 63 CB "
+                                       "BA ?? ?? 00 00 66 44 89 6C 24 20 44 0F B7 48 36 45 0F B7 44 CC 04");
+    const uintptr_t seeded = find_in(naming, kNamingSpan, "0F B7 D3 49 8B CC E8 ?? ?? ?? ?? 83 FE ?? 75 ?? BA ?? ?? 00 00 48 8B "
+                                                    "CF E8");
+    const uintptr_t picks = find_in(naming, kNamingSpan,
+                                    "48 8B D7 41 0F B6 CF E8 ?? ?? ?? ?? 48 8B D7 41 0F B6 CF 0F B7 D8 E8 ?? ?? ?? ?? 41 "
+                                    "8B 0C 24 0F B7 F0 4C 69 C1 C5 90 C6 6A 41 8B 4C 24 04 B8 1F 85 EB 51 4C 03 C1 41 F7 "
+                                    "E0 49 8B C8 45 89 04 24 48 C1 E9 20 41 8B C0 C1 EA 05 41 89 4C 24 04 6B CA ?? 2B C1 "
+                                    "83 F8 ?? 7C ?? B8 FF FF 00 00 BA ?? ?? 00 00 EB ?? 48 8B D7 41 0F B6 CF E8 ?? ?? ?? "
+                                    "?? BA ?? ?? 00 00");
+    const uintptr_t loop = find_in(naming, 0x2000,
+                                   "40 55 56 48 83 EC 28 48 8B F1 E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 80 "
+                                   "38 00 0F 84 ?? ?? ?? ?? 48 89 5C 24 40 BA 08 00 00 00 48 89 7C 24 48 48 8B CE 4C 89 "
+                                   "74 24 50 4C 89 7C 24 20 E8 ?? ?? ?? ?? 44 0F B6 F0 48 8D 1D ?? ?? ?? ?? BF 04 00 00 "
+                                   "00 4C 8D 3D ?? ?? ?? ?? 0F 1F 40 00 48 63 13 4D 8B 0C D7 4D 85 C9 74 09 45 8B C6 48 "
+                                   "8B CE 41 FF D1");
+    const char* why = nullptr;
+    // The three pickers are one routine, told the list by r8d.
+    const uintptr_t pick_prefix = picks ? call_at(picks + 7) : 0;
+    const uintptr_t pick_suffix = picks ? call_at(picks + 22) : 0;
+    const uintptr_t pick_appellation = picks ? call_at(picks + 108) : 0;
+    const uintptr_t picker = pick_prefix && find_in(pick_prefix, 3, "45 33 C0") == pick_prefix ? jmp_at(pick_prefix + 3) : 0;
+    const bool one_picker = picker && pick_suffix && pick_appellation &&
+                            find_in(pick_suffix, 6, "41 B8 01 00 00 00") == pick_suffix &&
+                            jmp_at(pick_suffix + 6) == picker &&
+                            find_in(pick_appellation, 6, "41 B8 02 00 00 00") == pick_appellation &&
+                            jmp_at(pick_appellation + 6) == picker;
+    // The picker: the bank's data tables (the same getter as the requirement test's rows), the count of list r8d (`lea
+    // rcx, [rbx+rbx*2]` then `mov rbx, [rax+rcx*8+disp]`), the step and the index, the list's ids (`lea rax,
+    // [rsi+imm]; lea rax, [rax+rax*2]`: the list by its index times 0x18).
+    const uintptr_t tables_call = picker ? find_in(picker, 0x40, "48 85 D2 0F 84 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 0C 5B 48 "
+                                                                 "8B F3 4C 8B F0 48 8B 9C C8 ?? ?? ?? ??")
+                                         : 0;
+    const uintptr_t tables_of = tables_call ? call_at(tables_call + 9) : 0;
+    const uintptr_t tables_lea =
+        tables_of ? find_in(tables_of, 0x40, "48 8B 44 24 38 48 8D 0D ?? ?? ?? ?? 48 03 C0 48 8B 04 C1") : 0;
+    const uintptr_t step = picker ? find_in(picker, 0xA0, "8B 00 8B 4A 04 4C 69 C0 C5 90 C6 6A 4C 03 C1 8D 4B FF 44 89 02 "
+                                                          "85 CB 74 ?? 49 8B C8 41 8B C0 48 C1 E9 20 89 4A 04 33 D2 F7 "
+                                                          "F3")
+                                  : 0;
+    const uintptr_t list_lea =
+        picker ? find_in(picker, 0x100, "48 8D 86 ?? ?? 00 00 48 8D 04 40 48 89 7C 24 58 49 3B 7C C6 08") : 0;
+    int32_t count_disp = 0, list_index = 0;
+    const bool lists = tables_lea && step && list_lea && mem::read_safe(tables_call + 28, &count_disp) &&
+                       mem::read_safe(list_lea + 3, &list_index) && list_index > 0 && list_index < 0x1000 &&
+                       count_disp == list_index * 0x18 + 8;
+    // The seed routine: lo the seed, hi a constant.
+    const uintptr_t seed_fn = seeded ? call_at(seeded + 6) : 0;
+    int32_t seed_hi = 0;
+    const bool seed_ok = seed_fn && find_in(seed_fn, 10, "89 11 C7 41 04 ?? ?? ?? ?? C3") == seed_fn &&
+                         mem::read_safe(seed_fn + 5, &seed_hi) && seed_hi > 0;
+    // The mod loop: the mods getter (`add rax, imm8` past the unit's data), the base mods, the handler table.
+    const uintptr_t mods_getter = loop ? call_at(loop + 10) : 0;
+    const uintptr_t mods_add =
+        mods_getter ? find_in(mods_getter, 0x60, "48 8B 43 10 48 85 C0 74 0A 48 83 C0 ?? 48 83 C4 20 5B C3") : 0;
+    const uintptr_t handlers = loop ? rip_operand(loop + 85, 3, 7) : 0;
+    const uintptr_t base_mods = loop ? rip_operand(loop + 73, 3, 7) : 0;
+    const auto handler_of = [handlers](int mod) {
+      uintptr_t fn = 0;
+      return handlers && mod > 0 && mod < 256 &&
+                     mem::read_safe(handlers + static_cast<uintptr_t>(mod) * sizeof(uintptr_t), &fn)
+                 ? fn
+                 : 0;
+    };
+    int32_t first_base = 0;
+    const bool base_names = base_mods && mem::read_safe(base_mods, &first_base) && handler_of(first_base) == naming;
+    // The strings and the champion types.
+    int32_t herald_stat = 0, super_default = 0, champ_format = 0, format1 = 0, format2 = 0;
+    char key[16] = {}, key_default[16] = {};
+    uint64_t key8 = 0;
+    uint16_t key2 = 0;
+    int32_t default_len = 0;
+    const uintptr_t key_default_at = herald_default ? rip_operand(herald_default, 3, 7) : 0;
+    const bool keys =
+        herald_key && mem::read_safe(rip_operand(herald_key + 18, 4, 8), &key8) &&
+        mem::read_safe(rip_operand(herald_key + 30, 3, 7), &key2) && key_default_at &&
+        mem::read_safe(herald_default + 11, &default_len) && default_len > 0 &&
+        default_len < static_cast<int32_t>(sizeof(key_default)) &&
+        mem::copy_from(key_default, key_default_at, static_cast<size_t>(default_len));
+    if (keys) {
+      std::memcpy(key, &key8, 8);
+      std::memcpy(key + 8, &key2, 2);
+      key_default[default_len] = 0;
+    }
+    const bool strings = herald && super && champion && picks && mem::read_safe(herald + 36, &herald_stat) &&
+                         mem::read_safe(super + 43, &super_default) && mem::read_safe(champion + 55, &champ_format) &&
+                         mem::read_safe(picks + 95, &format1) && mem::read_safe(picks + 114, &format2) &&
+                         herald_stat > 0 && herald_stat < 0x1000 && super_default > 0 && super_default < 0x10000 &&
+                         champ_format > 0 && champ_format < 0x10000 && format1 > 0 && format1 < 0x10000 &&
+                         format2 > 0 && format2 < 0x10000;
+    const uintptr_t champ_table = champion ? rip_operand(champion, 3, 7) : 0;
+    const uintptr_t champ_end = champion ? rip_operand(champion + 13, 3, 7) : 0;
+    const int compared = champ_table && champ_end > champ_table ? static_cast<int>((champ_end - champ_table) / 8) : 0;
+    bool types = compared > 0 && compared + 1 <= 8;
+    for (int i = 0; types && i <= compared; ++i) {
+      int32_t mod = 0, text = 0;
+      types = mem::read_safe(champ_table + static_cast<uintptr_t>(i) * 8, &mod) &&
+              mem::read_safe(champ_table + static_cast<uintptr_t>(i) * 8 + 4, &text) && mod > 0 && mod < 256 &&
+              text > 0 && text < 0x10000 && handler_of(mod) == naming;
+      f.champion_mod[i] = mod;
+      f.champion_text[i] = static_cast<uint16_t>(text);
+    }
+    const int fixed = seeded ? byte_at(seeded + 13) : -1;
+    if (!seed_read || !herald || !herald_key || !herald_default || !super || !champion || !seeded || !picks || !loop)
+      why = "its steps";
+    else if (!one_picker || !lists)
+      why = "the name lists";
+    else if (!seed_ok)
+      why = "the name's stream";
+    else if (!keys || !strings)
+      why = "the strings it names";
+    else if (!types || !base_names || !mods_add || handler_of(fixed) != naming)
+      why = "the naming mods";
+    if (!why) {
+      f.seed_at = byte_at(seed_read + 12);
+      f.mods_at = byte_at(mods_add + 12);
+      f.herald_stat = herald_stat;
+      std::memcpy(f.herald_key, key, sizeof(key));
+      std::memcpy(f.herald_default, key_default, sizeof(key_default));
+      f.super_default = static_cast<uint16_t>(super_default);
+      f.champion_format = static_cast<uint16_t>(champ_format);
+      f.champion_types = compared + 1;
+      f.fixed_mod = fixed;
+      f.base_mod = first_base;
+      f.unique_format1 = static_cast<uint16_t>(format1);
+      f.unique_format2 = static_cast<uint16_t>(format2);
+      f.coin_mod = static_cast<uint32_t>(byte_at(picks + 81));
+      f.coin_below = static_cast<uint32_t>(byte_at(picks + 86));
+      f.seed_hi = static_cast<uint32_t>(seed_hi);
+      f.tables = rip_operand(tables_lea + 5, 3, 7);
+      f.lists_at = list_index * 0x18;
+      f.list_stride = 0x18;
+      // The super unique row: the getter the handler asks (`movzx eax, word [rax+imm8]` past the unit's data).
+      const uintptr_t super_getter = call_at(super);
+      const uintptr_t super_read = super_getter ? find_in(super_getter, 0x60, "48 8B 43 10 48 85 C0 74 ?? 0F B7 40 ?? 48 "
+                                                                              "83 C4 20 5B C3")
+                                                : 0;
+      f.super_at = super_read ? byte_at(super_read + 12) : 0;
+      f.known = f.seed_at > 0 && f.mods_at > 0 && f.super_at > 0 && f.coin_mod > 0 && f.coin_below > 0 &&
+                f.coin_below <= f.coin_mod && f.tables && key[0] && key_default[0];
+      if (!f.known) why = "the monster's data";
+    }
+    if (why) {
+      f = NameFacts{};
+      log_warn("sites: the client's naming of monsters is not read the way expected (%s) - a named enemy far away is "
+               "marked with its monster's name until it is seen",
+               why);
+    }
+  }
   static const char* const kNames[dCount] = {"client unit table",       "server unit table",
                                              "server GetUnitByIdAndType", "client GetUnitByIdAndType",
                                              "players take no damage",  "monsters take no damage",
@@ -2220,6 +2448,20 @@ void derive() {
        r.hireling_row, r.hireling_version, r.hireling_monster_at, r.hireling_kind_at, r.hireling_class_at,
        r.mercenary_flag, rva_of(r.client_pets), r.pet_type_at, r.pet_id_at, r.pet_owner_at, r.pet_gone_at,
        r.pet_next_at, r.mercenary_pet, r.refresh ? "" : "(not checked) ", rva_of(r.refresh));
+  logf("sites: %-28s %s", "kill experience",
+       g_kill_exp_checked ? "its level penalty gives two equal levels the whole amount, and both of its calls of the "
+                            "ratio are the getter found"
+                          : "not checked");
+  const NameFacts& n = g_names;
+  logf("sites: %-28s %sa monster's name seed at its data +0x%X, its mods at +0x%X, its super unique row at +0x%X; a "
+       "Herald \"%s\" N by stat %d (else \"%s\"); a super unique without a name string %d; a champion format %d with "
+       "%d types (mod %d's string when none is the mod); a random unique formats %d / %d, its stream's hi %u, an "
+       "appellation below %u of %u; the name lists in the data tables 0x%llX at +0x%X, 0x%X apart; no random name for "
+       "mod %d",
+       "monster names", n.known ? "" : "not derived ", n.seed_at, n.mods_at, n.super_at, n.herald_key, n.herald_stat,
+       n.herald_default, n.super_default, n.champion_format, n.champion_types,
+       n.champion_types ? n.champion_mod[n.champion_types - 1] : 0, n.unique_format1, n.unique_format2, n.seed_hi,
+       n.coin_below, n.coin_mod, rva_of(n.tables), n.lists_at, n.list_stride, n.fixed_mod);
 }
 
 size_t dump_image(uintptr_t exe_base, const wchar_t* path) {

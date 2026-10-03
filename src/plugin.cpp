@@ -878,7 +878,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
   std::snprintf(line, sizeof(line),
                 "CabbyCodes v%s: build %s (%s), scope %s, mod '%s', sites %ld/%d, hooks %s, player %s (#%u life %d/%d "
                 "mana %d/%d lvl %d exp %lld ticks %u). god=%d (%u hits on you, %u life losses refused) mana=%d exit=%d "
-                "exp=x%.1f (%u gains scaled, %u the mercenary's) speed=+%d%%",
+                "exp=x%.1f (%u gains scaled, %u the mercenary's; %u kills at their full worth) speed=+%d%%",
                 D2RCC_VERSION, ctx->buildVersion ? ctx->buildVersion : "?", ctx->buildName ? ctx->buildName : "?",
                 scope_name(ctx->loadScope), ctx->activeMod ? ctx->activeMod : "", static_cast<long>(g_sites_usable),
                 static_cast<int>(sites::kCount), g_bound ? "installed" : "pending", st.player_found ? "found" : "-",
@@ -886,7 +886,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                 st.ticks, cheats::enabled(cheats::kGodMode), st.hits_absorbed, hooks::life_losses_kept(),
                 cheats::enabled(cheats::kInfiniteMana),
                 cheats::enabled(cheats::kExitBeforeDeath), static_cast<double>(cheats::exp_multiplier()),
-                st.exp_awards, st.exp_awards_merc, cheats::move_speed_bonus());
+                st.exp_awards, st.exp_awards_merc, st.exp_full, cheats::move_speed_bonus());
   say(line);
   const loot::Stats loot_stats = loot::stats();
   std::snprintf(line, sizeof(line),
@@ -1064,11 +1064,13 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
     std::snprintf(line, sizeof(line),
                   "map: landmarks=%d%s%s, this game %u areas, %u object icons and %u waypoint tiles put on, %u areas "
                   "filled ahead (%u rooms built for the game to fill) and %u of the objects it rolled put on; "
-                  "enemies=%d%s%s, %u spawn spots read, %u named enemies drawn (%u of them on the map now), %u marks "
+                  "enemies=%d%s%s, %u spawn spots read, %u named enemies read ahead from the server (%u names "
+                  "worked out otherwise than the client's), %u drawn by the client (%u marks on the map now), %u marks "
                   "let go as their monster died",
                   cheats::enabled(cheats::kMapLandmarks), lm_why ? " - " : "", lm_why ? lm_why : "", ms.areas, ms.icons,
                   ms.waypoints, rf.areas, rf.rooms, ms.rolled, cheats::enabled(cheats::kMapEnemies),
-                  en_why ? " - " : "", en_why ? en_why : "", ms.spots, ms.drawn, ms.kept, ms.dead);
+                  en_why ? " - " : "", en_why ? en_why : "", ms.spots, ms.ahead, ms.names_off, ms.drawn, ms.kept,
+                  ms.dead);
     say(line);
     std::snprintf(line, sizeof(line), "map: exits=%d%s%s, %u areas, %u warps and %u openings named (%u on the map now)",
                   cheats::enabled(cheats::kMapExits), ex_why ? " - " : "", ex_why ? ex_why : "", ms.exit_areas,

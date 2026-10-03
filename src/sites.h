@@ -236,6 +236,17 @@ enum Id : int {
                          // Read only: its pet lookup names the client's pet list and the mercenary's pet type
   kPetOfType,            // (game, player, pet type, any) -> the player's live pet of that type: the server's lookup of a
                          // player's mercenary, the one its handlers of the mercenary's gear ask (called)
+  // Experience at a kill's full worth (server thread). The kill experience routine asks one routine per receiver (the
+  // killer or its party, and the mercenary) what the kill gives it: the monster's experience less the game's penalty
+  // for the levels between the receiver and the monster, times the high-level ratio of experience.txt, plus the item
+  // bonus, and for a hireling at most a share of its level.
+  kKillExperience,       // (game, receiver, its level, the monster's level, the monster's experience on the stack) ->
+                         // what the kill gives the receiver (hooked)
+  kExpRatio,             // (u8 bank, level) -> the level's ExpRatio (level 0: the shift it is divided by); called only
+                         // by the routine above (hooked)
+  // Named enemies on the map: the client names a monster in the handler its naming mods run (read, never called).
+  kMonsterNaming,        // (unit, mod, unique) : a Herald's, a super unique's, a champion's or a random unique's name,
+                         // as string ids into the client's monster data
   kCount
 };
 
@@ -546,6 +557,37 @@ struct RequirementFacts {
   uintptr_t refresh = 0;         // (game, unit, 0, 0); 0 when it does not
 };
 const RequirementFacts& requirement_facts();
+// Experience at a kill's full worth, read from the kill's experience routine (not known: nothing is taken for granted).
+bool kill_experience_checked();  // it asks the level penalty with its third and fourth arguments (the receiver's level,
+                                 // then the monster's), the penalty gives two equal levels the whole amount, and both
+                                 // of its calls of the ratio getter are the hooked one
+// The client's names of monsters, read from its naming handler and the routines it calls (not known: nothing is taken
+// for granted). A server unit carries what the client is sent: the name seed, the kind, the mods, the super unique row.
+struct NameFacts {
+  bool known = false;
+  int seed_at = 0;               // monster data: the name seed (u16) a random unique is named by
+  int mods_at = 0;               // ... its mods (9 bytes; a 0 ends them)
+  int super_at = 0;              // ... its super unique row (u16)
+  int herald_stat = 0;           // a Herald: the string of the key below and this stat's value ...
+  char herald_key[16] = {};      // ... ("HeraldName" N)
+  char herald_default[16] = {};  // ... or of this key when there is none
+  uint16_t super_default = 0;    // a super unique whose row names no string: this one
+  uint16_t champion_format = 0;  // a champion: this format, with its type's string (by its mod) and its monster's name
+  int champion_types = 0;        // the types: each mod compared but the last, whose string is taken when none is
+  int champion_mod[8] = {};
+  uint16_t champion_text[8] = {};
+  int fixed_mod = 0;             // the naming mod that gives one fixed string (Blood Raven's): no random name for it
+  int base_mod = 0;              // the first of the base mods the client runs before a monster's own (a naming one)
+  uint16_t unique_format1 = 0;   // a random unique: a prefix and a suffix ...
+  uint16_t unique_format2 = 0;   // ... and an appellation, on a coin
+  uint32_t coin_mod = 0;         // the coin: a step of the name's stream, lo % coin_mod below coin_below
+  uint32_t coin_below = 0;
+  uint32_t seed_hi = 0;          // the name's stream: lo the seed, hi this
+  uintptr_t tables = 0;          // the data tables of a bank: a pointer per bank, 16 bytes apart (banks 0 .. 3)
+  int lists_at = 0;              // a bank's data tables: the name lists {u16* string ids, u64 count}, prefixes first,
+  int list_stride = 0;           // then suffixes and appellations this far apart
+};
+const NameFacts& name_facts();
 uintptr_t call_target(Id site);  // where a call-site entry's `call rel32` goes (0 when unknown or not a call)
 uintptr_t exe_base();
 // The live bytes at a routine's entry (the signature's span), for the loader's expected-bytes checks.

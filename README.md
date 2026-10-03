@@ -10,8 +10,10 @@ Press F7, or open the game's Esc menu, and the panel is there.
 - **Infinite mana** - your skills cost nothing, and the orb stays full.
 - **Infinite stamina** - run without end.
 - **Experience multiplier** - every experience gain is multiplied, 1x to 1000x, kills and quest rewards alike.
-  Your mercenary's gains are multiplied too, so it levels with you (it stops gaining at your level, the game's
-  own rule).
+  A kill counts its full worth: the game's own cuts are left out (above level 69 a kill gives less and less, down to
+  0.6% at level 98, and only 5% for a monster ten or more levels below you), so 1000x is a thousand times what a kill
+  is worth at any level, in any area. Your mercenary's gains are multiplied too, so it levels with you (it stops
+  gaining at your level, the game's own rule).
 - **Damage multiplier** - the damage you deal is multiplied, 1x to 100x: your attacks and spells, your summons' and
   your mercenary's, poison and burning included.
 - **Movement speed** - up to +300 %, stacking with the game's own bonuses.
@@ -54,8 +56,10 @@ Press F7, or open the game's Esc menu, and the panel is there.
   jungle and Kurast, Acts 4 and 5, dungeons), the game fills all of the area's rooms as you enter it, with its own
   rolls, and they are on the map within a second or two.
 - **Named enemies on the map** - unique and super unique monsters, bosses, champions and Heralds get a red cross on
-  the automap with their name, however far away: super uniques and bosses from the moment you enter their area, the
-  rest from the moment the game makes them (as you first come near their room), until they die.
+  the automap with their name, however far away, from the moment you enter their area, until they die: the game is
+  let make all of an area's monsters as you enter it (it would make each room's as you first came near it), and the
+  named ones are marked where they stand. Only the monsters the game makes at an event come with it (the Chaos
+  Sanctuary's seal bosses and Diablo, Baal's waves).
 - **Area names at exits** - the name of the area each exit leads to, on the automap: at a cave's entrance, a
   dungeon's stairs or a trap door, and at each opening where one area meets the next (the zone line between two
   outdoor areas, a town's gate), for the area you are in.
@@ -513,6 +517,7 @@ The plugin hooks a handful of the game's own routines through the loader:
 | the player death penalties | last line of defence: leave before the death is counted |
 | skill mana cost | infinite mana: the local player's skills cost 0 on the server and in the client's prediction |
 | add experience (the player's and the mercenary's) | the multiplier scales the gain before the game adds it, so level-ups follow |
+| what a kill gives one receiver, and the high-level experience ratio it asks | the multiplier counts a kill's full worth: for you and your mercenary the routine is run with the monster's level taken to be your own (no penalty for the levels between) and the ratio answers 100% |
 | the client's level-name lookup, while the automap or the waypoint panel asks | area levels appended to the names (the levels come from the game's own Levels table) |
 | the treasure-class drop routine (monsters and chests) | loot filter and Chronicle drops (every pick; a pick the filter hides, or the Chronicle has, made up for by one it shows or misses, which the routine is asked for with a treasure class of one entry) and extra drops |
 | item creation | loot filter and Chronicle drops: a drop is made only in a form the filter shows or as an item the Chronicle misses (the request says which unique or set item, whether ethereal, whether with sockets), and one of neither in every form is not made (the drop routine gets no item, as it does when there is no room for one) |
@@ -584,8 +589,12 @@ routines. For the objects an area rolls as its rooms are filled (most shrines an
 outdoors), the server's side does the same: on the server's thread, as the character enters such an area, each of
 its rooms not built yet is built with the same room builder, a few a server frame, and the game's own fill pass
 fills them as it fills the rooms a player comes near (presets, monsters, object groups); the objects in them are then
-read and those with an icon put on the map. The server keeps a room it has built for the rest of the game, so these
-rooms end as the rooms you have walked past do.
+read and those with an icon put on the map. With named enemies on the map, every area but a town is filled so (its
+monsters too are made as its rooms are filled), and the monsters in it are read from the server's side: a named one
+is marked where it stands, with the name the client gives it, worked out the way the client's own code works it out
+(a unique's name from its name seed and the game's name lists, a champion's type, a Herald's title). Each time you
+enter the area again it is read again. The server keeps a room it has built for the rest of the game, so these rooms
+end as the rooms you have walked past do.
 
 Keeping the automap and Show Items between games hooks nothing. On the UI thread, while a game runs, it reads whether
 the automap panel is open and whether each Show Items key is on, from the same places the game's own getters read:

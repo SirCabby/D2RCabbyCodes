@@ -18,6 +18,12 @@ struct Unit;
 // which puts those with an icon on the automap's layer of the area. Placement is the game's own rolls and rules; only
 // the order the rooms are filled in is the area's list's, not the one the character walks in. Only the areas whose
 // object groups can roll an object with an icon (mapmarks::level_rolls_icons); each once per game.
+//
+// Named enemies on the map (approved 2026-10-03: "Fill and read"): a random unique, a champion, a Herald exists nowhere
+// before the server fills its room (its random monsters, 0x503790). Under the switch every area but a town is filled the
+// same way as it is entered, and the monsters in its rooms are read from the server's side and handed to mapmarks,
+// which marks the named ones with the name the client would give them; an area filled before is read again each time
+// it is entered.
 namespace d2rcc::roomfill {
 
 using game::Unit;
@@ -27,7 +33,7 @@ void bind();
 bool ready();
 // Any thread: the character may stand in an area not filled yet (the loader's area and game events, a switch).
 void arm();
-// The server thread (the tick), under Landmarks on the map.
+// The server thread (the tick), under Landmarks on the map or Named enemies on the map.
 void on_tick(void* game, Unit* player, uint32_t tick);
 void game_left();
 
@@ -35,6 +41,7 @@ struct Stats {
   unsigned areas = 0;    // areas whose rooms were filled ahead this game
   unsigned rooms = 0;    // ... rooms built for the game to fill
   unsigned objects = 0;  // ... objects with an icon handed to the map
+  unsigned monsters = 0; // ... named monsters handed to the map (the areas' first reads)
 };
 Stats stats();
 

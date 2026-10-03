@@ -537,7 +537,10 @@ void draw_panel() {
         ImGui::TextDisabled("(%s)", why);
       } else {
         help_marker("Every experience gain is multiplied by this, 1 to 1000: kills and quest rewards alike. "
-                    "Your mercenary's gains too, so it levels with you (it stops gaining at your level).");
+                    "A kill counts its full worth: the game's own cuts are left out (above level 69 it gives less "
+                    "and less, down to 0.6% at 98, and only 5% for a monster ten or more levels below you), so 1000x "
+                    "is a thousand times a kill's worth at any level and in any area. Your mercenary's gains too, so "
+                    "it levels with you (it stops gaining at your level).");
       }
     }
     {
@@ -811,11 +814,11 @@ void draw_panel() {
     cheat_row(cheats::kMapEnemies, "Named enemies on the map",
               "Unique and super unique monsters, bosses, champions and a terror zone's Heralds get a red cross on the "
               "automap with their name above it, the way the game marks town folk (a champion pack's name once, in "
-              "the game's champion blue), however far away they are. Super uniques and bosses are marked from the "
-              "moment you enter their area (Bishibosh's camp, the Countess's floor, Andariel's lair...). Other "
-              "uniques, champions and Heralds do not exist until the game makes them - it makes a room's monsters as "
-              "you first come near the room - and are marked from then on, where they are or were last seen, "
-              "wherever you go, until they die. Minions and your own pets get none.");
+              "the game's champion blue), however far away they are, from the moment you enter their area: the game "
+              "is let make the whole area's monsters as you enter it (it would make a room's as you first came near "
+              "it), and the named ones are marked where they stand. They stay marked wherever you go until they die. "
+              "Only the ones the game makes at an event come with it: the Chaos Sanctuary's seal bosses and Diablo, "
+              "Baal's waves. Minions and your own pets get none.");
     cheat_row(cheats::kMapExits, "Area names at exits",
               "The name of the area each exit leads to is written on the automap, for the area you are in and each "
               "area you enter after it: at a cave's entrance, a dungeon's stairs or a trap door, and at each opening "
