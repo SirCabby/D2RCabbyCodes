@@ -35,6 +35,7 @@ volatile LONG g_remembered[kCount] = {};
 volatile LONG g_mode[kCount] = {game::kDisplayUnknown, game::kDisplayUnknown, game::kDisplayUnknown};
 volatile LONG g_armed = 0;         // a game began: the UI thread starts putting the three back
 volatile LONG g_loading_gone = 0;  // the loading screen of that game went away
+volatile LONG g_loading_up = 0;    // a loading screen is up now (a game's, or an act's)
 volatile LONG g_leaving = 0;       // the game is being left: nothing more is recorded
 volatile LONG g_reset = 0;         // the game was left: the UI thread forgets it
 volatile LONG g_look = 0;          // something happened: the three may be another way now
@@ -47,17 +48,28 @@ const char* state_word(int w, bool on) { return w == kAutomap ? (on ? "open" : "
 
 // UI thread only.
 enum Phase { kIdle, kRestore, kTrack, kLeft };
+// Why the three are put back: a game was loaded, or a cinematic of the game's closed the automap.
+enum Why { kAtLoad, kAfterCinematic };
 struct Restore {
+  Why why = kAtLoad;
   ULONGLONG armed = 0;
-  ULONGLONG ready = 0;  // the character first stood in the game
+  ULONGLONG ready = 0;  // the character first stood in the game (after a cinematic: and no loading screen was up)
   int presses[kCount] = {};
   ULONGLONG last_press[kCount] = {};
   bool refused[kCount] = {};
 };
 Phase g_phase = kIdle;
 Restore g_restore;
+bool g_held = false;  // the last look found a panel open that the game closes the automap for (a cinematic)
 ULONGLONG g_modes_at = 0;
 gate::Looks g_looks(kLooksPerEvent, kSecondLookMs, kSafetyLookMs);
+
+void begin_restore(ULONGLONG now, Why why) {
+  g_phase = kRestore;
+  g_restore = Restore{};
+  g_restore.why = why;
+  g_restore.armed = now;
+}
 
 // The option is on and usable, and for a Show Items key the game shows it in Toggle mode.
 bool kept(int w) {
@@ -80,11 +92,18 @@ void refresh_modes(ULONGLONG now) {
   }
 }
 
-// While the game loads: press a key whose state is not the remembered one, until the loading screen is gone.
+// While the game loads, or once a cinematic of the game's is over: press a key whose state is not the remembered
+// one, for a moment (at a load until the loading screen is gone).
 void restore(ULONGLONG now) {
+  const bool after = g_restore.why == kAfterCinematic;
   game::Unit* me = game::local_client_player();
-  if (!me || game::unit_is_dead(me) || game::current_level() <= 0 || overlay::pause_open()) {
-    if (now - g_restore.armed > kGiveUpMs) {
+  // While a cinematic is up the game refuses the automap; after one, the loading screen of an act change may still
+  // be up, and is waited for (10 s at the most).
+  const bool held = game::automap_held_closed() == 1;
+  const bool loading = after && g_loading_up && now - g_restore.armed < kLoadingFallbackMs;
+  if (!me || game::unit_is_dead(me) || game::current_level() <= 0 || overlay::pause_open() || held || loading) {
+    // After a cinematic the character is in the game already: it is waited for as long as it takes.
+    if (!after && now - g_restore.armed > kGiveUpMs) {
       log_warn("remember: the character never stood in the game - nothing was put back");
       g_phase = kTrack;
       look();
@@ -108,11 +127,26 @@ void restore(ULONGLONG now) {
     logf("remember: pressed the key for %s (%s, wanted %s): now %s", kLabels[w], state_word(w, now_on != 0),
          state_word(w, g_remembered[w] != 0), after < 0 ? "unknown" : state_word(w, after != 0));
   }
-  const bool loaded = g_loading_gone || now - g_restore.ready >= kLoadingFallbackMs;
+  const bool loaded = after || g_loading_gone || now - g_restore.ready >= kLoadingFallbackMs;
   if (!loaded || now - g_restore.ready < kSettleMs) return;
   g_phase = kTrack;
   look();  // tracking starts from what they are now
   int presses = 0;
+  if (after) {
+    for (int w = 0; w < kCount; ++w) {
+      if (!kept(w)) continue;
+      presses += g_restore.presses[w];
+      const int on = game::key_action_state(kKeys[w]);
+      if (on < 0 || (on != 0) != (g_remembered[w] != 0))
+        log_warn("remember: %s could not be made %s again after the game's cinematic (%d presses)", kLabels[w],
+                 state_word(w, g_remembered[w] != 0), g_restore.presses[w]);
+      else if (g_restore.presses[w])
+        logf("remember: %s is %s again after the game's cinematic (%d press%s)", kLabels[w], state_word(w, on != 0),
+             g_restore.presses[w], g_restore.presses[w] == 1 ? "" : "es");
+    }
+    if (presses) cheats::note("The automap put back after the game's cinematic");
+    return;
+  }
   for (int w = 0; w < kCount; ++w) {
     if (!cheats::enabled(kKinds[w])) continue;
     presses += g_restore.presses[w];
@@ -134,6 +168,19 @@ void restore(ULONGLONG now) {
 void track(ULONGLONG now) {
   // Under the Esc menu nothing changes by hand, and leaving the game starts there.
   if (overlay::pause_open()) return;
+  // A panel the game closes the automap for as it opens (a cinematic) is the game's doing: nothing is recorded
+  // while it is up, and once it is gone the three are put back.
+  if (game::automap_held_closed() == 1) {
+    if (!g_held && kept(kAutomap) && g_remembered[kAutomap])
+      logf("remember: a cinematic of the game's closed the automap - it is opened again once the cinematic is over");
+    g_held = true;
+    return;
+  }
+  if (g_held) {
+    g_held = false;
+    begin_restore(now, kAfterCinematic);
+    return;
+  }
   for (int w = 0; w < kCount; ++w) {
     if (!kept(w)) continue;
     const int on = game::key_action_state(kKeys[w]);
@@ -179,11 +226,13 @@ void bind(bool ui_thread) {
 void on_ui(ULONGLONG now) {
   if (!g_bound) return;
   perf::Timer timer(perf::kRemember);
-  if (g_reset && InterlockedExchange(&g_reset, 0)) g_phase = kIdle;
+  if (g_reset && InterlockedExchange(&g_reset, 0)) {
+    g_phase = kIdle;
+    g_held = false;
+  }
   if (g_armed && InterlockedExchange(&g_armed, 0)) {
-    g_phase = kRestore;
-    g_restore = Restore{};
-    g_restore.armed = now;
+    begin_restore(now, kAtLoad);
+    g_held = false;
     g_modes_at = 0;
   }
   if (g_phase == kIdle || g_phase == kLeft) return;
@@ -214,7 +263,12 @@ void game_joined(uint64_t session) {
   InterlockedExchange(&g_armed, 1);
 }
 
-void loading_screen_gone() { InterlockedExchange(&g_loading_gone, 1); }
+void loading_screen_shown() { InterlockedExchange(&g_loading_up, 1); }
+
+void loading_screen_gone() {
+  InterlockedExchange(&g_loading_up, 0);
+  InterlockedExchange(&g_loading_gone, 1);
+}
 
 void leaving() { InterlockedExchange(&g_leaving, 1); }
 
@@ -222,6 +276,7 @@ void game_left() {
   InterlockedExchange(&g_reset, 1);
   InterlockedExchange(&g_armed, 0);
   InterlockedExchange(&g_leaving, 0);
+  InterlockedExchange(&g_loading_up, 0);
   InterlockedExchange64(&g_session, -1);
   InterlockedExchange(&g_flush, 1);
 }

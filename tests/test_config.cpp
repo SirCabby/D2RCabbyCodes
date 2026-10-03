@@ -63,6 +63,7 @@ int main() {
   CHECK(!s.cannot_be_cursed && !s.infinite_gold && s.home_town == 0);
   CHECK(!s.infinite_imbue && !s.infinite_sockets && !s.infinite_personalize);
   CHECK(!s.infinite_cube_ingredients && !s.auto_identify);
+  CHECK(!s.ignore_requirements && !s.ignore_requirements_mercenary);
   CHECK(!s.passive_mercenary && !s.passive_minions && !s.permanent_revives);
   CHECK(!s.map_named_enemies && !s.map_landmarks && !s.map_exit_names);
   CHECK(!s.logging && !s.trace);  // the log is written only when the file says so,
@@ -73,7 +74,7 @@ int main() {
   if (std::ifstream f{"res/cabbycodes.toml", std::ios::binary}) {
     const std::string shipped((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     Settings installed;
-    CHECK(parse(shipped, &installed) == 62);
+    CHECK(parse(shipped, &installed) == 64);
     CHECK(rewrite(shipped, Settings{}) == shipped);
     CHECK(!installed.logging && installed.log_level == d2rcc::LogLevel::kInfo && !installed.trace);
   } else {
@@ -112,6 +113,7 @@ int main() {
   s.infinite_sockets = true;
   s.infinite_personalize = true;
   s.infinite_cube_ingredients = true;
+  s.ignore_requirements = true;
   s.home_town = 5;
   s.reveal_map = true;
   s.map_landmarks = true;
@@ -154,17 +156,19 @@ int main() {
                   "infinite_potions = true\r\n") != std::string::npos);
   CHECK(text.find("infinite_potions = true\r\ninfinite_keys = true\r\nno_durability_loss = true\r\n"
                   "infinite_gold = true\r\ninfinite_imbue = false\r\ninfinite_sockets = true\r\n"
-                  "infinite_personalize = true\r\ninfinite_cube_ingredients = true\r\nhome_town = 5\r\n"
+                  "infinite_personalize = true\r\ninfinite_cube_ingredients = true\r\nignore_requirements = true\r\n"
+                  "ignore_requirements_mercenary = false\r\nhome_town = 5\r\n"
                   "remember_automap = true\r\nremember_show_items = false\r\n"
                   "remember_show_items_unfiltered = true\r\n") != std::string::npos);
   CHECK(text.find("automap_was_open = true\r\nshow_items_was_on = false\r\nshow_items_unfiltered_was_on = true\r\n"
                   "logging = false\r\nlog_level = \"warning\"\r\n\r\n[d2rl]") != std::string::npos);
 
   Settings back;
-  CHECK(parse(text, &back) == 62);
+  CHECK(parse(text, &back) == 64);
   CHECK(back.cannot_be_cursed && back.infinite_gold && back.home_town == 5);
   CHECK(!back.infinite_imbue && back.infinite_sockets && back.infinite_personalize);
   CHECK(back.infinite_cube_ingredients);
+  CHECK(back.ignore_requirements && !back.ignore_requirements_mercenary);
   CHECK(!back.logging && back.log_level == d2rcc::LogLevel::kWarning);
   CHECK(back.god_mode && back.exp_multiplier == 12.5f && back.move_speed_bonus == 150);
   CHECK(back.exit_method == ExitMethod::kForceClose && back.toggle_key == 0x2D);
@@ -190,10 +194,11 @@ int main() {
   CHECK(filled.find("toggle_key = \"INSERT\"\nlogging = false\nlog_level = \"warning\"\ntrace = false\n") !=
         std::string::npos);
   Settings s3;
-  CHECK(parse(filled, &s3) == 62);
+  CHECK(parse(filled, &s3) == 64);
   CHECK(s3.cannot_be_cursed && s3.infinite_gold && s3.home_town == 5);
   CHECK(!s3.infinite_imbue && s3.infinite_sockets && s3.infinite_personalize);
   CHECK(s3.infinite_cube_ingredients && s3.auto_identify);
+  CHECK(s3.ignore_requirements && !s3.ignore_requirements_mercenary);
   CHECK(!s3.logging && s3.log_level == d2rcc::LogLevel::kWarning);
   Settings on_again;
   CHECK(parse("[cabbycodes]\nlogging = true\n", &on_again) == 1 && on_again.logging);
@@ -214,10 +219,10 @@ int main() {
 
   // Out-of-range values clamp; unknown keys and bad values are ignored.
   Settings s4;
-  CHECK(parse("[cabbycodes]\nexp_multiplier = 999\nmove_speed_bonus = -5\ntoggle_key = \"nope\"\nbogus = 1\n"
+  CHECK(parse("[cabbycodes]\nexp_multiplier = 9999\nmove_speed_bonus = -5\ntoggle_key = \"nope\"\nbogus = 1\n"
               "boss_bar_position = 90\nextra_drops = 99\n",
               &s4) == 4);
-  CHECK(s4.exp_multiplier == 50.0f && s4.move_speed_bonus == 0 && s4.toggle_key == 0x76 && s4.boss_bar_position == 50);
+  CHECK(s4.exp_multiplier == 1000.0f && s4.move_speed_bonus == 0 && s4.toggle_key == 0x76 && s4.boss_bar_position == 50);
   CHECK(s4.extra_drops == 20);
   Settings s5;
   CHECK(parse("[cabbycodes]\nextra_drops = -3\n", &s5) == 1 && s5.extra_drops == 0);
@@ -241,6 +246,9 @@ int main() {
   CHECK(parse("[cabbycodes]\ninfinite_sockets = 1\n", &s7) == 0 && !s7.infinite_sockets);
   CHECK(parse("[cabbycodes]\ninfinite_cube_ingredients = true\n", &s7) == 1 && s7.infinite_cube_ingredients);
   CHECK(parse("[cabbycodes]\ninfinite_cube_ingredients = yes\n", &s7) == 0 && !s7.infinite_cube_ingredients);
+  CHECK(parse("[cabbycodes]\nignore_requirements = true\nignore_requirements_mercenary = true\n", &s7) == 2 &&
+        s7.ignore_requirements && s7.ignore_requirements_mercenary);
+  CHECK(parse("[cabbycodes]\nignore_requirements = on\n", &s7) == 0 && !s7.ignore_requirements);
   CHECK(parse("[cabbycodes]\nauto_identify = true\n", &s7) == 1 && s7.auto_identify);
   CHECK(parse("[cabbycodes]\nauto_identify = 1\n", &s7) == 0 && !s7.auto_identify);
   CHECK(parse("[cabbycodes]\npassive_mercenary = true\npassive_minions = true\n", &s7) == 2 &&

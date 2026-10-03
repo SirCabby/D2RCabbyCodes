@@ -26,6 +26,7 @@ enum Id : int {
   kGetUnitByIdAndType,   // (id, type) -> unit; two copies, one per unit table (client and server)
   kIsOnlineState,        // CLIENT_IsOnlineState () -> bool
   kPlayerAddExperience,  // PLAYER_AddExperience (game, player, level, amount): every experience gain
+  kHirelingAddExperience,  // (game, player, hireling, its level, amount on the stack): the mercenary's gain
   kGetManaCost,          // D2Common_SKILLMANA_GetManaCost (dataCtx u8, skillId, level) -> cost in 256ths
   kManaCostServerCall,   // the call to it inside D2GAME_SKILLMANA_Consume (the unit is in rsi there)
   kManaCostClientCall,   // the client's call to it before its own mana check (the unit is in rbx there)
@@ -222,6 +223,19 @@ enum Id : int {
                          // a built room keeps its collision map, and the map's layout (area names at exits)
   kWarpTilePreset,       // (bank, DRLG room, tile x, y, tile flags, orientation): a warp tile's preset unit, of type 5
                          // and the warp's id for its class. Read only (area names at exits)
+  kRoomFillPass,         // (game): once a server frame, every room of each act built since and not filled yet is filled
+                         // (its presets, random monsters, object groups, terror). Read only: that a room the
+                         // landmarks build ahead is filled by the game itself (roomfill.cpp)
+  // Ignore item requirements (any thread). Every test of the game's whether a unit can use an item goes through one
+  // routine, on both sides: the client's (wearing, tooltips, the red background) and the server's (an item put on, a
+  // worn item's stats counted, a charm's), and D2RCore's tooltip, charm and slot checks call it too.
+  kItemRequirements,     // (item, unit, equipping, int* strength met, int* dexterity met, int* level met, body
+                         // location) -> nonzero when the unit can use the item: level, strength and dexterity, then
+                         // identified, a tome's quantity, 3.3's restricted sockets and the item type's class (hooked)
+  kClientMercUsable,     // client, UI thread: (item, any panel) -> al: whether the client's mercenary can wear the item.
+                         // Read only: its pet lookup names the client's pet list and the mercenary's pet type
+  kPetOfType,            // (game, player, pet type, any) -> the player's live pet of that type: the server's lookup of a
+                         // player's mercenary, the one its handlers of the mercenary's gear ask (called)
   kCount
 };
 
@@ -254,6 +268,8 @@ enum Derived : int {
   dSettingValue,         // (setting) -> its value
   dShowItemsState,       // {u8* on, u64 count}: on[0] Show Items, on[1] Show Items (Unfiltered)
   dUiVars,               // the classic UI vars: a byte per panel id, nonzero while the panel is open
+  dPanelRules,           // the panel gate's rules: per open panel a row of 32 int32, one per panel that opens
+                         // (1: the open one is closed; 2, 3: the new one is refused)
   dKeyActions,           // the key-action table: {press, release, flags}, 0x18 bytes per action id
   // A Worldstone Shard's use and the zone job's rotation: the terror routines (named only when both make the same
   // calls, and the game and config layouts terror.cpp reads are where their code has them).
@@ -476,6 +492,60 @@ struct MapFacts {
   int collision_at = 0;        // an ActiveRoom: its collision map {x, y, width, height (subtiles), ... +0x20 u16 flags}
 };
 const MapFacts& map_facts();
+// Rooms filled ahead (roomfill.cpp): a server room built is put on its act's list of rooms, and the game's fill pass
+// fills every one of them not filled yet; what that leaves in a room is read from its units.
+struct FillFacts {
+  bool known = false;          // the fill pass's steps, the room's state and the unit walk are as read
+  int room_state_at = 0;       // an ActiveRoom: its state, whose filled bit the pass tests and sets
+  uint32_t filled_bit = 0;
+  int room_units_at = 0;       // ... its first unit (the pick-up's walk: 0x2EFD90)
+  int unit_next_at = 0;        // a unit: the next of its room (0x34B4A0)
+};
+const FillFacts& fill_facts();
+// Ignore item requirements (requirements.cpp), read from the requirement test's own code and the routines it calls (not
+// known: nothing is taken for granted). Past level, strength and dexterity the test asks, in this order: the item's
+// identified flag; a tome's quantity; the restricted-socket test, at the item type's two body locations (both must
+// refuse) or at the one it was asked about; the item type's class, the only class that can use it when below
+// class_none: a player's own, or for a monster that is a hireling (its Hireling row's kind not 0) the class its row
+// lets it use when it carries the mercenary flag (none otherwise). The rows are read where the game's getters read
+// them: a bank's data tables, a pointer each in an array.
+struct RequirementFacts {
+  bool known = false;            // all of the above is as read
+  uintptr_t restricted = 0;      // (unit, item, body location) -> al: another item the unit wears shares a restricted
+                                 // socket type with this one (3.3's Colossal Jewels); called the way the test calls it
+  uint32_t identified = 0;       // the item flag (item data +0x18) it asks for
+  int tome_type = 0;             // an item of exactly this type needs a quantity of at least 1 ...
+  int quantity_stat = 0;         // ... in this stat
+  uintptr_t tables = 0;          // the data tables of a bank: a pointer per bank, 16 bytes apart (banks 0 .. 3)
+  int items_at = 0;              // Items rows in a bank's tables: {rows, u64 count}
+  int item_row = 0;              // ... bytes a row
+  int item_type_at = 0;          // ... a row's item type (int16)
+  int types_at = 0;              // ItemTypes rows: {rows, u64 count}
+  int type_row = 0;
+  int body1_at = 0;              // ... a row's two body locations (bytes)
+  int body2_at = 0;
+  int class_at = 0;              // ... its class (a byte)
+  int class_none = 0;            // a class at or above it is none: any class can use the type
+  int hirelings_at = 0;          // Hireling rows: {rows, u64 count}
+  int hireling_row = 0;
+  int hireling_version = 0;      // ... the version (u16 at +0) of an expansion bank's rows (a classic bank's are 0)
+  int hireling_monster_at = 0;   // ... a row's monster class (int32)
+  int hireling_kind_at = 0;      // ... what the class test asks first (int32; 0: the monster is no hireling)
+  int hireling_class_at = 0;     // ... the class whose class-only items the hireling may use (int8; below 0 none)
+  uint32_t mercenary_flag = 0;   // the unit flag (+0x124) the hireling's class asks for
+  // The mercenary's client copy: the client's own pet list names it (the client's check of what the mercenary can
+  // wear looks it up there by its pet type and the local player as its owner).
+  uintptr_t client_pets = 0;     // the list's head (a pointer to its first node)
+  int pet_type_at = 0;           // a node: its pet type, its unit's id, its owner's id, nonzero when it is gone (the
+  int pet_id_at = 0;             // lookup the client asks skips such a node), the next node
+  int pet_owner_at = 0;
+  int pet_gone_at = 0;
+  int pet_next_at = 0;
+  int mercenary_pet = 0;         // the mercenary's pet type
+  // The items worked out again: the cube's refresh (cube_facts().refresh_items), checked to ask the requirement test.
+  uintptr_t refresh = 0;         // (game, unit, 0, 0); 0 when it does not
+};
+const RequirementFacts& requirement_facts();
 uintptr_t call_target(Id site);  // where a call-site entry's `call rel32` goes (0 when unknown or not a call)
 uintptr_t exe_base();
 // The live bytes at a routine's entry (the signature's span), for the loader's expected-bytes checks.

@@ -208,6 +208,33 @@ int main() {
     CHECK(exit_place(false, 100, -1, mid).y == 103);
   }
 
+  // Which levels roll an object with an icon as their rooms are filled: a group with a chance that names, with a chance
+  // of its own, a class with a cell.
+  {
+    int16_t cell[16] = {};
+    cell[5] = 310;  // a shrine
+    cell[6] = 0;    // a chest
+    ObjGroup rows[4];
+    rows[1].classes[0] = 6;  // chests only
+    rows[1].chances[0] = 100;
+    rows[2].classes[0] = 6;  // a chest or a shrine
+    rows[2].chances[0] = 50;
+    rows[2].classes[1] = 5;
+    rows[2].chances[1] = 50;
+    rows[3].classes[0] = 5;  // a shrine never picked
+    rows[3].chances[0] = 0;
+    const uint8_t none[kObjGroupSlots] = {};
+    uint8_t g[kObjGroupSlots] = {1, 0, 0, 0, 0, 0, 0, 0}, c[kObjGroupSlots] = {50, 0, 0, 0, 0, 0, 0, 0};
+    CHECK(!rolls_icons(g, c, rows, 4, cell, 16));
+    g[1] = 2;
+    CHECK(!rolls_icons(g, c, rows, 4, cell, 16));  // the shrine's group has no chance of its own here
+    c[1] = 25;
+    CHECK(rolls_icons(g, c, rows, 4, cell, 16));
+    uint8_t g3[kObjGroupSlots] = {3, 9, 0, 0, 0, 0, 0, 0}, c3[kObjGroupSlots] = {100, 100, 0, 0, 0, 0, 0, 0};
+    CHECK(!rolls_icons(g3, c3, rows, 4, cell, 16));  // a shrine at no chance, and a group past the table
+    CHECK(!rolls_icons(none, none, rows, 4, cell, 16));
+  }
+
   // Over the game's tables.
   const char* dir = std::getenv("D2RCC_EXCEL");
   std::vector<uint8_t> objects, monsters, supers;
@@ -340,6 +367,54 @@ int main() {
                 named, level_count - 1, key(2).c_str(), warp_links, warp_count);
   } else {
     std::printf("the Levels and LvlWarp rows are not at hand (D2RCC_EXCEL) - their layout was not checked\n");
+  }
+
+  // The object groups the levels name, read where the game's object group step reads them (Levels +0xED / +0xF5,
+  // ObjGroup rows of 0x30 bytes), against the txt; and which levels can roll an object with an icon.
+  std::vector<uint8_t> groups_raw;
+  uint32_t group_count = 0;
+  if (dir && *dir && !levels.empty() && !objects.empty() &&
+      rows_of(std::string(dir) + "/objgroup.bin", kObjGroupRow, &groups_raw, &group_count)) {
+    const auto lv = [&](uint32_t row, size_t at_) { return levels[row * 0x18C + at_]; };
+    CHECK(lv(2, kLevelObjGroups) == 4 && lv(2, kLevelObjGroups + 1) == 38 && lv(2, kLevelObjGroups + 3) == 34);
+    CHECK(lv(2, kLevelObjChances) == 3 && lv(2, kLevelObjChances + 1) == 17);
+    CHECK(lv(101, kLevelObjGroups + 1) == 61 && lv(101, kLevelObjChances + 1) == 25);
+    std::vector<ObjGroup> groups(group_count);
+    for (uint32_t g = 0; g < group_count; ++g)
+      for (int k = 0; k < kObjGroupSlots; ++k) {
+        groups[g].classes[k] = at<int32_t>(groups_raw, g * kObjGroupRow + kObjGroupClasses + static_cast<size_t>(k) * 4);
+        groups[g].chances[k] = groups_raw[g * kObjGroupRow + kObjGroupChances + static_cast<size_t>(k)];
+      }
+    CHECK(group_count > 61 && groups[61].classes[0] == 199 && groups[61].classes[3] == 206 &&
+          groups[61].classes[4] == 202 && groups[61].chances[3] == 20);
+    std::vector<int16_t> cells(object_count);
+    for (uint32_t i = 0; i < object_count; ++i) {
+      const int32_t c = at<int32_t>(objects, i * 0x168 + 0x164);
+      cells[i] = static_cast<int16_t>(c > 0 && c < 0x7FFF ? c : 0);
+    }
+    std::string rolling;
+    int rolls = 0;
+    const auto rolls_of = [&](uint32_t row) {
+      uint8_t g[kObjGroupSlots], c[kObjGroupSlots];
+      for (int k = 0; k < kObjGroupSlots; ++k) {
+        g[k] = lv(row, kLevelObjGroups + static_cast<size_t>(k));
+        c[k] = lv(row, kLevelObjChances + static_cast<size_t>(k));
+      }
+      return rolls_icons(g, c, groups.data(), static_cast<int>(group_count), cells.data(), static_cast<int>(object_count));
+    };
+    for (uint32_t r = 1; r < level_count; ++r)
+      if (rolls_of(r)) {
+        ++rolls;
+        rolling += (rolling.empty() ? "" : " ") + std::to_string(r);
+      }
+    // Act 1's and Act 2's outdoor areas and every town roll none; Act 3's jungle, Kurast and Travincal, the Durance,
+    // Act 4's and Act 5's outdoor areas, the Den of Evil roll some.
+    for (uint32_t r : {1u, 2u, 3u, 4u, 5u, 6u, 7u, 40u, 41u, 42u, 43u, 44u, 75u, 103u, 109u}) CHECK(!rolls_of(r));
+    for (uint32_t r : {8u, 76u, 77u, 78u, 79u, 80u, 83u, 100u, 101u, 102u, 104u, 110u, 117u}) CHECK(rolls_of(r));
+    std::printf("the object groups: %u rows; %d levels roll an object with an icon as their rooms are filled: %s\n",
+                group_count, rolls, rolling.c_str());
+  } else {
+    std::printf("the ObjGroup rows are not at hand (D2RCC_EXCEL) - which levels roll shrines was not checked\n");
   }
 
   if (g_failures) {

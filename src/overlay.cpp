@@ -529,14 +529,15 @@ void draw_panel() {
     {
       float m = cheats::exp_multiplier();
       ImGui::SetNextItemWidth(number_box);
-      if (ImGui::InputFloat("Experience multiplier (x)", &m, 0.5f, 5.0f, "%.1f"))
-        cheats::set_exp_multiplier(std::clamp(m, 1.0f, 50.0f));
+      if (ImGui::InputFloat("Experience multiplier (x)", &m, 1.0f, 50.0f, "%.1f"))
+        cheats::set_exp_multiplier(std::clamp(m, 1.0f, 1000.0f));
       if (ImGui::IsItemDeactivatedAfterEdit()) changed("Experience multiplier", "changed");
       if (const char* why = cheats::why_not(cheats::kExpMultiplier)) {
         ImGui::SameLine();
         ImGui::TextDisabled("(%s)", why);
       } else {
-        help_marker("Every experience gain is multiplied by this, 1 to 50: kills and quest rewards alike.");
+        help_marker("Every experience gain is multiplied by this, 1 to 1000: kills and quest rewards alike. "
+                    "Your mercenary's gains too, so it levels with you (it stops gaining at your level).");
       }
     }
     {
@@ -636,6 +637,18 @@ void draw_panel() {
               "sockets too, and the portal recipes keep their keys, organs and Wirt's Leg. An item a recipe changes "
               "in place - an upgrade, added sockets, a repair, Clear Sockets' item - is what it makes: it is changed, "
               "not copied.");
+
+    ImGui::Spacing();
+    cheat_row(cheats::kIgnoreRequirements, "Ignore item requirements",
+              "Your character can wear and use any item its class can, whatever its level, Strength and Dexterity "
+              "(a level 1 character with no attribute points spent included): an item's required level, Strength "
+              "and Dexterity no longer stop it, everything it gives counts, charms in the inventory too, and its "
+              "tooltip shows them as met. Class-only items (orbs, claws, Paladin shields, Barbarian helms...) stay "
+              "with their class, and an unidentified item still cannot be worn. Switched off, what you wear stays "
+              "on, but an item whose requirements you do not meet gives nothing again, as in the game.");
+    cheat_row(cheats::kIgnoreRequirementsMerc, "Ignore item requirements (mercenary)",
+              "The same for your mercenary: it can wear any item it can use, whatever its level, Strength and "
+              "Dexterity, and everything it wears counts.");
 
     ImGui::Spacing();
     {
@@ -790,9 +803,11 @@ void draw_panel() {
               "What the automap shows of an area only once you have come near it - waypoints, shrines, wells, quest "
               "objects (the Cairn Stones, the Inifuss tree, the Horadric and Khalim chests, the seals), the Arcane "
               "Sanctuary's portals, trap doors and stairs - is on it as soon as you enter the area, wherever the "
-              "area's layout places them. The shrines and wells the game places at random in a dungeon as you come "
-              "near are in no layout: they appear as the game has them. What is put on is saved with the map, as "
-              "what you see yourself is.");
+              "area's layout places them. The shrines and wells the game rolls at random as it fills a room (most of "
+              "Act 3's, Acts 4 and 5's and the dungeons') are in no layout: as you enter such an area the game fills "
+              "all of its rooms at once, with its own rolls and rules, the way it fills a room you come near, and what "
+              "it rolled is on the map within a second or two. Its monsters are made up front too, in their rooms. "
+              "What is put on is saved with the map, as what you see yourself is.");
     cheat_row(cheats::kMapEnemies, "Named enemies on the map",
               "Unique and super unique monsters, bosses, champions and a terror zone's Heralds get a red cross on the "
               "automap with their name above it, the way the game marks town folk (a champion pack's name once, in "
@@ -848,7 +863,9 @@ void draw_panel() {
               "When you load a character, the automap is open or closed the way it was when you last left a game "
               "(with any character). D2RCore already keeps it within one run of the game, and on the first game of "
               "a run it closes the map; this keeps it after the game is closed too, and overrides the game's own "
-              "'open on load' option.");
+              "'open on load' option. In a game, the game closes the map for its cinematics (the first time you "
+              "reach an act after its boss, and after Diablo and Baal); it is opened again once the cinematic is "
+              "over.");
     keep_note(remember::kAutomap, cheats::kRememberAutomap, "");
     cheat_row(cheats::kRememberShowItems, "Keep Show Items on between games",
               "When you load a character, Show Items (the names of the items on the ground, as your loot filter "

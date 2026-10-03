@@ -42,6 +42,7 @@ const char* const kNames[kCount] = {"God mode",        "Infinite mana",   "Infin
                                     "Infinite gold",
                                     "Infinite imbues",      "Infinite sockets", "Infinite personalizing",
                                     "Infinite cube ingredients",
+                                    "Ignore item requirements", "Ignore item requirements (mercenary)",
                                     "Reveal the map",       "Named enemies on the map", "Landmarks on the map",
                                     "Area names at exits",
                                     "Item level",      "Keep the automap", "Keep Show Items",
@@ -98,6 +99,8 @@ void init(const config::Settings& s) {
   InterlockedExchange(&g_on[kInfiniteSockets], s.infinite_sockets ? 1 : 0);
   InterlockedExchange(&g_on[kInfinitePersonalize], s.infinite_personalize ? 1 : 0);
   InterlockedExchange(&g_on[kInfiniteCubeIngredients], s.infinite_cube_ingredients ? 1 : 0);
+  InterlockedExchange(&g_on[kIgnoreRequirements], s.ignore_requirements ? 1 : 0);
+  InterlockedExchange(&g_on[kIgnoreRequirementsMerc], s.ignore_requirements_mercenary ? 1 : 0);
   set_home_town(s.home_town);
   InterlockedExchange(&g_on[kRevealMap], s.reveal_map ? 1 : 0);
   InterlockedExchange(&g_on[kMapEnemies], s.map_named_enemies ? 1 : 0);
@@ -129,7 +132,7 @@ void set_enabled(Kind k, bool on) {
 float exp_multiplier() { return static_cast<float>(g_exp_x100) / 100.0f; }
 void set_exp_multiplier(float m) {
   if (m < 1.0f) m = 1.0f;
-  if (m > 50.0f) m = 50.0f;
+  if (m > 1000.0f) m = 1000.0f;
   InterlockedExchange(&g_exp_x100, static_cast<LONG>(m * 100.0f + 0.5f));
 }
 int move_speed_bonus() { return g_speed; }
@@ -261,6 +264,8 @@ void to_settings(config::Settings* s) {
   s->infinite_sockets = g_on[kInfiniteSockets] != 0;
   s->infinite_personalize = g_on[kInfinitePersonalize] != 0;
   s->infinite_cube_ingredients = g_on[kInfiniteCubeIngredients] != 0;
+  s->ignore_requirements = g_on[kIgnoreRequirements] != 0;
+  s->ignore_requirements_mercenary = g_on[kIgnoreRequirementsMerc] != 0;
   s->home_town = home_town();
   s->reveal_map = g_on[kRevealMap] != 0;
   s->map_named_enemies = g_on[kMapEnemies] != 0;

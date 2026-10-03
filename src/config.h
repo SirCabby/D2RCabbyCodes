@@ -19,7 +19,7 @@ struct Settings {
   bool god_mode = false;
   bool infinite_mana = false;
   bool infinite_stamina = false;
-  float exp_multiplier = 1.0f;      // 1.0 .. 50.0
+  float exp_multiplier = 1.0f;      // 1.0 .. 1000.0
   int move_speed_bonus = 0;         // percent, 0 .. 300
   bool exit_before_death = false;
   int exit_below_life_percent = 0;  // 0: only a lethal hit; 1..99: also below this
@@ -67,6 +67,8 @@ struct Settings {
   bool infinite_sockets = false;     // ... Larzuk adds sockets
   bool infinite_personalize = false; // ... Anya personalizes
   bool infinite_cube_ingredients = false;  // a cube recipe uses nothing up: the ingredients come back to the inventory
+  bool ignore_requirements = false;  // your character can use any item its class can (no level, strength, dexterity)
+  bool ignore_requirements_mercenary = false;  // ... your mercenary any item it can
   int home_town = 0;                 // the town your town portals lead to and you wake in after a death: 0 the
                                      // game's own (the town of the act you are in), 1 .. 5 that act's
   // Kept between games: when a character is loaded, the automap and the two Show Items keys are the way they

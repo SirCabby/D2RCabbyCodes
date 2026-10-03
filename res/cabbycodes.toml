@@ -13,7 +13,8 @@ god_mode = false
 infinite_mana = false
 infinite_stamina = false
 
-# Experience gained is multiplied by this (1.0 = normal). 1.0 to 50.0.
+# Experience gained is multiplied by this (1.0 = normal), your mercenary's
+# gains too. 1.0 to 1000.0.
 exp_multiplier = 1.0
 
 # The damage your hits do - yours, your summons' and your mercenary's - is
@@ -85,6 +86,15 @@ infinite_personalize = false
 # not a copy. Portal recipes keep their keys, organs and Wirt's Leg.
 infinite_cube_ingredients = false
 
+# Item requirements: your character can wear and use any item its class can,
+# whatever its level, strength and dexterity (a level 1 with no attribute
+# points spent included): an item's required level, strength and dexterity no
+# longer stop it, and what it gives counts. Class-only items (orbs, claws,
+# Paladin shields...) stay with their class, and an unidentified item still
+# cannot be worn. The second does the same for your mercenary's gear.
+ignore_requirements = false
+ignore_requirements_mercenary = false
+
 # Your home town. 0: none (the game's own: a town portal leads to the town of
 # the act it is read in, and a death wakes you in the town of the act you died
 # in). 1 to 5: that act's town, whatever act you are in: your town portals lead
@@ -126,8 +136,11 @@ reveal_map = false
 # are marked too. A mark goes once its monster is seen dead.
 map_named_enemies = false
 # Landmarks on the automap at once: what the automap shows only once you are
-# near - waypoints, shrines, wells, quest objects - for each area you enter
-# (what its layout places; a dungeon's random shrines keep the game's rule).
+# near - waypoints, shrines, wells, quest objects - for each area you enter.
+# What the area's layout places is put on at once; for the shrines and wells
+# the game rolls as it fills a room (Act 3's jungle and Kurast, Acts 4 and 5,
+# the dungeons) the game fills all of the area's rooms as you enter it, with
+# its own rolls, and what it rolled is put on within a second or two.
 map_landmarks = false
 # The name of the area each exit leads to, on the automap, for each area you
 # enter: at a cave's entrance or a dungeon's stairs, and at each opening where
@@ -197,7 +210,8 @@ best_affixes = false
 # is open or closed, and Show Items and Show Items (Unfiltered) are on or off,
 # the way they were when you last left a game. The two Show Items ones work
 # only while the game's Item Name Display option (and Unfiltered Item Name
-# Display) is set to Toggle.
+# Display) is set to Toggle. The game closes the map for its cinematics (the
+# first time you reach an act after its boss); remember_automap opens it again.
 remember_automap = false
 remember_show_items = false
 remember_show_items_unfiltered = false

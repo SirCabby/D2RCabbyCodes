@@ -9,7 +9,9 @@ Press F7, or open the game's Esc menu, and the panel is there.
   maximum (Battle Orders ended) still comes down to it.
 - **Infinite mana** - your skills cost nothing, and the orb stays full.
 - **Infinite stamina** - run without end.
-- **Experience multiplier** - every experience gain is multiplied, 1x to 50x, kills and quest rewards alike.
+- **Experience multiplier** - every experience gain is multiplied, 1x to 1000x, kills and quest rewards alike.
+  Your mercenary's gains are multiplied too, so it levels with you (it stops gaining at your level, the game's
+  own rule).
 - **Damage multiplier** - the damage you deal is multiplied, 1x to 100x: your attacks and spells, your summons' and
   your mercenary's, poison and burning included.
 - **Movement speed** - up to +300 %, stacking with the game's own bonuses.
@@ -33,6 +35,10 @@ Press F7, or open the game's Esc menu, and the panel is there.
 - **Infinite cube ingredients** - a Horadric Cube recipe uses nothing up: what you put in comes back to your
   inventory beside what it made (at your feet when there is no room), and Clear Sockets gives back what was in the
   sockets too.
+- **Ignore item requirements** - your character can wear and use any item its class can, whatever its level,
+  Strength and Dexterity (a level 1 with no attribute points spent included): an item's required level, Strength
+  and Dexterity no longer stop it, everything it gives counts (charms too), and its tooltip shows them as met.
+  Class-only items stay with their class. A second switch does the same for your mercenary's gear.
 - **Respec** - reset every skill and attribute point, as a Token of Absolution does.
 - **Skill and attribute presets** - save what a character spent its points on under a name, and load it back later
   (the character is reset and the points spent again).
@@ -44,7 +50,9 @@ Press F7, or open the game's Esc menu, and the panel is there.
   enter after it.
 - **Landmarks on the map** - what the automap shows only once you have come near it - waypoints, shrines, wells,
   quest objects and chests, Act 3's sewer stairs and their lever - is on it as soon as you enter an area, wherever
-  the area's layout places them.
+  the area's layout places them. For the shrines and wells the game rolls at random as it fills a room (Act 3's
+  jungle and Kurast, Acts 4 and 5, dungeons), the game fills all of the area's rooms as you enter it, with its own
+  rolls, and they are on the map within a second or two.
 - **Named enemies on the map** - unique and super unique monsters, bosses, champions and Heralds get a red cross on
   the automap with their name, however far away: super uniques and bosses from the moment you enter their area, the
   rest from the moment the game makes them (as you first come near their room), until they die.
@@ -81,7 +89,8 @@ Press F7, or open the game's Esc menu, and the panel is there.
   amulet, "of Luck" on boots, "of Quickness" on a weapon). So is the automatic affix some bases come with (a paladin
   shield's all resistances, up to 45). Which affixes, and how many, is still the game's roll.
 - **Kept between games** - when you load a character, the automap is open or closed, and Show Items and Show Items
-  (Unfiltered) are on or off, the way they were when you last left a game.
+  (Unfiltered) are on or off, the way they were when you last left a game. A cinematic the game plays (the first time
+  you reach an act after its boss) no longer leaves the map closed.
 - **Home town** - one town is your base: your town portals lead there, whatever act you read them in (the portal in
   that town takes you back to where you read it), and after a death you wake there.
 
@@ -156,7 +165,8 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
   damage multipliers, invincible and passive mercenary and minions, permanent revives, cannot be frozen, poisoned or
   cursed, infinite town portal,
   identify, potions and keys, no durability loss, infinite gold, infinite imbues, sockets and personalizing,
-  infinite cube ingredients, all areas terrorized, exit before death),
+  infinite cube ingredients, ignore item requirements (yours and the mercenary's), all areas terrorized, exit
+  before death),
   *Character* (respec,
   presets), *Loot* (loot filter drops, Chronicle drops, extra drops, perfect rolls, all superior, all ethereal, all
   socketed, max affixes, best affixes),
@@ -174,6 +184,8 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
   `revives on|off` (your revives stay until they die),
   `imbue|addsockets|personalize on|off` (Charsi's, Larzuk's and Anya's service without its quest),
   `cube on|off` (cube recipes use nothing up),
+  `requirements|mercrequirements on|off` (your gear, or your mercenary's, without its level, Strength and
+  Dexterity requirements),
   `home <0..5>` (your home town: 0 the game's own, 1 to 5 that act's town), `respec`,
   `preset [save|load <name>]`, `tz on|off`, `loot|chronicle|perfect|superior|eth|sockets|affixes|best on|off`,
   `drops <count>`,
@@ -190,7 +202,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `god_mode` | `false` | God mode at start-up. |
 | `infinite_mana` | `false` | Infinite mana at start-up. |
 | `infinite_stamina` | `false` | Infinite stamina at start-up. |
-| `exp_multiplier` | `1.0` | Experience gains are multiplied by this (1.0 to 50.0). |
+| `exp_multiplier` | `1.0` | Experience gains are multiplied by this (1.0 to 1000.0), your mercenary's too. |
 | `damage_multiplier` | `1.0` | The damage you, your summons and your mercenary deal is multiplied by this (1.0 to 100.0). |
 | `move_speed_bonus` | `0` | Extra movement speed in percent (0 to 300). |
 | `invincible_mercenary` | `false` | The mercenary takes nothing from any hit. |
@@ -211,6 +223,8 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `infinite_sockets` | `false` | Larzuk adds sockets whenever you ask, as often as you like, his quest (Siege on Harrogath) done or not. |
 | `infinite_personalize` | `false` | Anya personalizes whenever you ask, as often as you like, the quest for it (Betrayal of Harrogath) done or not. |
 | `infinite_cube_ingredients` | `false` | A Horadric Cube recipe uses nothing up: its ingredients come back to your inventory (at your feet when there is no room), and Clear Sockets gives back what was in the sockets. |
+| `ignore_requirements` | `false` | Your character can wear and use any item its class can, whatever its level, Strength and Dexterity: an item's required level, Strength and Dexterity no longer stop it, and what it gives counts. Class-only items stay with their class. |
+| `ignore_requirements_mercenary` | `false` | The same for your mercenary's gear. |
 | `home_town` | `0` | Your home town, where your town portals lead and you wake after a death: `0` the town of the act you are in (the game's own), `1` to `5` that act's town. Only a town the character has the waypoint of. |
 | `exit_before_death` | `false` | Leave the game instead of dying. |
 | `exit_below_life_percent` | `0` | Also leave when life falls below this percent (0 = only on a lethal hit). |
@@ -219,7 +233,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `area_level_automap` | `false` | The area's level after its name in the automap's area text. |
 | `area_level_waypoints` | `false` | The area's level after each destination in the waypoint list. |
 | `reveal_map` | `false` | The whole map of the area you are in, and of every area you enter after it, on the automap. |
-| `map_landmarks` | `false` | The landmarks the automap shows only once you are near (waypoints, shrines, wells, quest objects and chests, Act 3's sewer stairs and lever) are on it as soon as you enter an area, where its layout places them. A dungeon's random shrines and wells keep the game's own rule. |
+| `map_landmarks` | `false` | The landmarks the automap shows only once you are near (waypoints, shrines, wells, quest objects and chests, Act 3's sewer stairs and lever) are on it as soon as you enter an area, where its layout places them. For the shrines and wells the game rolls at random as it fills a room (Act 3's jungle, Kurast and Travincal, Acts 4 and 5, the dungeons) the game fills all of an area's rooms as you enter it, with its own rolls and rules, and what it rolled is put on. |
 | `map_named_enemies` | `false` | Unique and super unique monsters, bosses, champions and Heralds get a red cross with their name on the automap however far away they are: super uniques and bosses from the moment you enter their area, random uniques, champions and Heralds from the moment the game makes them (as you first come near their room), until they die. |
 | `map_exit_names` | `false` | The name of the area each exit leads to on the automap, for the area you are in: at cave entrances, stairs and trap doors, and at each opening where one area meets the next. |
 | `item_level` | `false` | An item's level after its name in its tooltip: weapons, armor, rings, amulets, charms and jewels. |
@@ -236,7 +250,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `all_socketed` | `false` | Every new normal or superior item whose base can have sockets has them (as many as the game rolls). |
 | `max_affixes` | `false` | Every new magic, rare and crafted item has as many affixes as its quality can have (magic 2, rare 6, rare jewel 4, crafted 4 random). |
 | `best_affixes` | `false` | Every affix a new magic, rare or crafted item gets, and the automatic affix some bases come with, is the best version of that affix the item could have at its level. |
-| `remember_automap` | `false` | A loaded character gets the automap open or closed as it was when you last left a game. |
+| `remember_automap` | `false` | A loaded character gets the automap open or closed as it was when you last left a game; after a cinematic of the game's it is opened again. |
 | `remember_show_items` | `false` | ... Show Items on or off (the game's Item Name Display option must be Toggle). |
 | `remember_show_items_unfiltered` | `false` | ... Show Items (Unfiltered) on or off (Unfiltered Item Name Display must be Toggle). |
 | `automap_was_open`, `show_items_was_on`, `show_items_unfiltered_was_on` | `false` | What those three remember; the plugin writes them as you play. |
@@ -419,6 +433,17 @@ only a line at each start that says so, and what you ask for by name.
   in the cube, changed, and is not copied. The portal recipes (the Secret Cow Level, Pandemonium, the red portal)
   keep their keys, organs and Wirt's Leg; whether a portal opens is still the game's own rule.
   Quest recipes (the Horadric Staff, Khalim's Will) give their parts back too.
+- **Ignore item requirements.** Every test of the game's whether a character can use an item asks one routine, on
+  both sides of the game: before an item is put on (yours, or the mercenary's), when what the worn items and the
+  charms give is worked out, and for the tooltip's requirement lines and the red background. With the switch on it
+  answers for your character as if its level, Strength and Dexterity were enough, whatever they are: a level 1
+  with no attribute points spent can wear anything its class can, and what it wears counts in full. The rest is
+  the game's own rule: class-only items (an orb, a claw, a Paladin shield, a Barbarian helm...) stay with their
+  class, an unidentified item cannot be worn, an empty tome is empty, and two Colossal Jewels cannot be worn at
+  once. Switched on or off in a game, the gear you wear counts (or stops counting) at once; switched off, what
+  you wear stays on, and an item whose requirements you do not meet gives nothing, as in the game. The
+  mercenary's switch does the same for its gear (the class items it may wear are still the game's: a Rogue's
+  Amazon bows, a Barbarian's Barbarian helms).
 - **Home town.** With a town chosen, a Scroll or Tome of Town Portal read in any act opens a portal to that town,
   and the blue portal that stands there takes you back to where you read it, in whichever act that was. The portal
   closes when you come back through it, as always. After a death you wake in that town too, where the game wakes
@@ -455,7 +480,10 @@ only a line at each start that says so, and what you ask for by name.
   Name Display, Unfiltered Item Name Display, in the game's options) set to Toggle; in Hold or Timed mode nothing
   is kept, and the panel says so. D2RLoader itself keeps the automap and Show Items (not the unfiltered one) within one run of the game, and
   on the first game of a run it closes the map, overriding the game's own "open on load" option; the automap option
-  here keeps the map after the game is closed too.
+  here keeps the map after the game is closed too. Within a game, the game closes the map for its cinematics (the
+  first time you reach Act 2, 3 or 4 after its act's boss, and after Diablo and Baal) and never opens it again; with
+  the automap option on, the map is opened again once the cinematic and the loading screen are over. A waypoint
+  between acts plays no cinematic and leaves the map as it is.
 - **Respec** is the Token of Absolution's own reset, run from the panel: every skill point and attribute point the
   character spent comes back to spend again. Quest rewards already received stay received.
 - **Presets** keep a character's base attributes and the points in each skill (not what items add), per class.
@@ -484,7 +512,7 @@ The plugin hooks a handful of the game's own routines through the loader:
 | "may this stat go down?" (asked by every stat writer before it lowers a value) | god mode: the answer is no for a player's life, whatever lowers it |
 | the player death penalties | last line of defence: leave before the death is counted |
 | skill mana cost | infinite mana: the local player's skills cost 0 on the server and in the client's prediction |
-| add experience | the multiplier scales the gain before the game adds it, so level-ups follow |
+| add experience (the player's and the mercenary's) | the multiplier scales the gain before the game adds it, so level-ups follow |
 | the client's level-name lookup, while the automap or the waypoint panel asks | area levels appended to the names (the levels come from the game's own Levels table) |
 | the treasure-class drop routine (monsters and chests) | loot filter and Chronicle drops (every pick; a pick the filter hides, or the Chronicle has, made up for by one it shows or misses, which the routine is asked for with a treasure class of one entry) and extra drops |
 | item creation | loot filter and Chronicle drops: a drop is made only in a form the filter shows or as an item the Chronicle misses (the request says which unique or set item, whether ethereal, whether with sockets), and one of neither in every form is not made (the drop routine gets no item, as it does when there is no room for one) |
@@ -509,6 +537,7 @@ The plugin hooks a handful of the game's own routines through the loader:
 | the cube's product routine, the free of an item, and the free of what is in an item's sockets | infinite cube ingredients: inside a transmute, the two frees the product routine makes of what it used up are not made; when it is through, each item goes to your inventory the way the game hands you a quest reward (else at your feet, as the game drops one) |
 | a monster's AI tick, the test whether a unit is another's enemy (which every way an AI looks for a target asks), and the getter of a target kept on a monster | passive mercenary and minions: while a passive pet's AI runs, no unit is its enemy and no target is kept for it, so it finds nothing to fight; any other question gets the game's answer |
 | the timer of the "killself" monster modifier (the end of a revive's time; a Decoy's and a "Reanimate As" monster's too) | permanent revives: for one of your revives the timer is not run, so nothing ends it; the game's own pet lookup says which of your pets it is, and every other monster's timer is the game's |
+| "can this unit use this item?" (asked on both sides, and by D2RCore: before an item is put on, for what a worn item or a charm gives, for a tooltip's requirement lines and the red background) | ignore item requirements: for you, or your mercenary, level, Strength and Dexterity count as met; the game's own tests after them still decide (an unidentified item, an empty tome, the Colossal Jewel rule, the class); when a switch changes, the game works your gear out again with its own routine |
 
 All areas terrorized hooks nothing: from the tick it applies each act's zone with the routine a Worldstone Shard's
 use calls (and tells the clients the way the shard does), and takes it off with the routine the half-hour rotation
@@ -551,14 +580,21 @@ not be announced), not at every frame; while an area is being revealed the work 
 landmarks, the named enemies' spawn spots and the area names at exits are read in the same pass, from what the room
 builder makes: a room's preset units, its links to the areas next to it, its collision map. The named enemies and
 the exits' names are drawn by one hook, on the automap's own draw of a unit, with the game's own marker and name
-routines.
+routines. For the objects an area rolls as its rooms are filled (most shrines and wells outside Acts 1 and 2's
+outdoors), the server's side does the same: on the server's thread, as the character enters such an area, each of
+its rooms not built yet is built with the same room builder, a few a server frame, and the game's own fill pass
+fills them as it fills the rooms a player comes near (presets, monsters, object groups); the objects in them are then
+read and those with an icon put on the map. The server keeps a room it has built for the rest of the game, so these
+rooms end as the rooms you have walked past do.
 
 Keeping the automap and Show Items between games hooks nothing. On the UI thread, while a game runs, it reads whether
 the automap panel is open and whether each Show Items key is on, from the same places the game's own getters read:
 when the game's own UI messages say a key or a button was pressed or a panel came or went, and once a second besides.
 When a character is loaded it presses the key whose state differs, through the game's own table of key actions (the
 function the game runs for Tab or the Show Items key, D2RLoader's wrapper of it where the loader has one, so the
-loader's own memory of the map and Show Items agrees).
+loader's own memory of the map and Show Items agrees). What the game does to the map by itself is told apart by the
+game's own rules for its panels (which panel closes which as it opens: for the automap, only the cinematics' panel):
+while that panel is open nothing is recorded, and once it is closed the keys are pressed as at a load.
 
 Movement speed goes into the player's base `velocitypercent` stat, so skills and items stack on top as usual.
 Save and Exit sends the same UI message the pause menu's button sends. See `CLAUDE.md` for the record.

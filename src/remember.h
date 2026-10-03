@@ -18,6 +18,10 @@
 // putting them back (every frame, for those seconds).
 // A Show Items key is kept only in the game's Toggle mode for it (Item Name Display, Unfiltered Item Name
 // Display): in Hold mode a press would hold it on, in Timed mode it goes off by itself.
+// Within a game the game closes the automap itself for a panel whose gate rule says so: in 3.3 only its cinematics,
+// which play as a character first reaches an act after its boss (a waypoint does not play one), and after Diablo and
+// Baal. That is not the player's doing: while such a panel is open nothing is recorded, and once it is gone (and a
+// loading screen with it) the three are put back the same way, through their keys.
 namespace d2rcc::remember {
 
 enum Which : int { kAutomap = 0, kShowItems, kShowItemsUnfiltered, kCount };
@@ -28,6 +32,7 @@ void bind(bool ui_thread);              // after game::bind(): what the game off
 void on_ui(ULONGLONG now);              // UI thread, every frame: a flag read until there is something to look at
 void look();                            // any thread: a key, a panel, a switch - the three may be another way now
 void game_joined(uint64_t session);     // any thread: a game began (its first call per session counts)
+void loading_screen_shown();            // any thread: the game's loading screen came up (a game's or an act's)
 void loading_screen_gone();             // any thread: the game's loading screen went away
 void leaving();                         // any thread: the game is being left (Save and Exit, the front end)
 void game_left();                       // any thread

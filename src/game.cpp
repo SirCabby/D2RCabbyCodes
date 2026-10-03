@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "log.h"
@@ -88,6 +89,11 @@ using TakeOutFn = Unit*(__fastcall*)(void* inventory, Unit* item) noexcept;
 using IdentifyFn = void(__fastcall*)(void* game, Unit* player, Unit* item, uint32_t own) noexcept;
 // Which of a player's pet lists a unit is in (player, unit id) -> the pet type, 0 when it is in none.
 using PetTypeFn = int32_t(__fastcall*)(Unit* player, uint32_t unit_id) noexcept;
+// Item requirements: the restricted-socket test (unit, item, body location) -> al, nonzero when another item the unit
+// wears shares a restricted socket type with this one; a player's live pet of a type (game, player, type, 0: a gone
+// one does not count) -> the unit or 0.
+using RestrictedFn = bool(__fastcall*)(Unit* unit, Unit* item, int32_t body_location) noexcept;
+using PetOfTypeFn = Unit*(__fastcall*)(void* game, Unit* player, int32_t type, int32_t any) noexcept;
 // The automap: a tile put on a layer's list (u8 bank, the tile, its DRLG room, the list), a cell put on one (the list,
 // {node, bool} out, the key: u16 0, u16 cell, int32 x, int32 y), a point of the map on the automap's screen (the view,
 // out, x | y << 32 pixels) -> out, one of its unit markers (x | y << 32, marker, scale), a name (UTF-8, x | y << 32,
@@ -161,6 +167,9 @@ FirstItemFn g_first_item = nullptr;
 TakeOutFn g_take_out = nullptr;
 IdentifyFn g_identify = nullptr;
 PetTypeFn g_pet_type = nullptr;
+RestrictedFn g_restricted = nullptr;
+PetOfTypeFn g_pet_of_type = nullptr;
+RefreshItemsFn g_items_refresh = nullptr;  // the same routine as g_refresh_items, bound by what the requirements read
 MapPutTileFn g_map_put_tile = nullptr;
 MapInsertFn g_map_insert = nullptr;
 MapPointFn g_map_point = nullptr;
@@ -169,6 +178,8 @@ MapNameFn g_map_name = nullptr;
 UnitNameFn g_unit_name = nullptr;
 uintptr_t g_key_press[kKeyActionCount] = {};  // the entry's press function as bind checked it (0: unusable)
 bool g_key_wrapped[kKeyActionCount] = {};
+constexpr int kPanels = 32;     // the panel gate's (its walk: `cmp ebx, 20h`)
+uint32_t g_automap_closers = 0;  // the panels whose opening closes the automap, a bit each
 bool g_cure_failed = false;  // an unlink left its list on the unit: the cure stays off
 volatile LONG g_local_id = -1;
 volatile LONG g_difficulty = 0;
@@ -232,6 +243,7 @@ constexpr uintptr_t kRoomNext = 0x48;
 constexpr uintptr_t kLevelFirstRoom = 0x10;
 constexpr uintptr_t kLevelDrlg = 0x1C8;
 constexpr uintptr_t kLevelId = 0x1F8;
+constexpr uintptr_t kRoomActive = 0x58;     // a DRLG room: its ActiveRoom once built (CreateActiveRoom answers it)
 constexpr uintptr_t kDrlgAutomapCallback = 0x838;
 constexpr uintptr_t kLevelDefLayer = 0x08;  // the Levels record: its automap layer (the automap callback reads it)
 // The key-action table: the ids of the three keys (the order of the game's key bindings, the ids its .key
@@ -315,6 +327,22 @@ const char* key_binding_note(KeyAction a) {
   return !has_key_action(a) ? "MISSING" : g_key_wrapped[a] ? "bound (D2RCore's wrapper)" : "bound (the game's)";
 }
 
+// The automap's row of the panel gate's rules: what the gate does to the open automap as each panel opens (1 closes
+// it). The rules are the game's static data.
+void bind_automap_closers() {
+  g_automap_closers = 0;
+  const uintptr_t rules = sites::derived(sites::dPanelRules);
+  const int automap = sites::automap_panel_id();
+  uintptr_t row = 0;
+  int32_t rule[kPanels] = {};
+  if (!rules || automap <= 0 || automap >= kPanels ||
+      !mem::read_safe(rules + static_cast<uintptr_t>(automap) * sizeof(uintptr_t), &row) || !row ||
+      !mem::copy_from(rule, row, sizeof(rule)))
+    return;
+  for (int p = 0; p < kPanels; ++p)
+    if (rule[p] == 1 && p != automap) g_automap_closers |= 1u << p;
+}
+
 }  // namespace
 
 bool bind() {
@@ -386,6 +414,12 @@ bool bind() {
   g_identify = sites::identify_facts().known ? at<IdentifyFn>(sites::kItemIdentify) : nullptr;
   g_pet_type = sites::revive_facts().known ? at<PetTypeFn>(sites::kPetTypeOf) : nullptr;
   {
+    const sites::RequirementFacts& r = sites::requirement_facts();
+    g_restricted = r.known ? reinterpret_cast<RestrictedFn>(r.restricted) : nullptr;
+    g_pet_of_type = r.known && r.client_pets ? at<PetOfTypeFn>(sites::kPetOfType) : nullptr;
+    g_items_refresh = r.known ? reinterpret_cast<RefreshItemsFn>(r.refresh) : nullptr;
+  }
+  {
     const sites::MapFacts& m = sites::map_facts();
     g_map_put_tile = m.tiles ? reinterpret_cast<MapPutTileFn>(m.tile_add) : nullptr;
     g_map_insert = m.objects ? reinterpret_cast<MapInsertFn>(m.list_insert) : nullptr;
@@ -395,6 +429,7 @@ bool bind() {
     g_unit_name = m.draw ? reinterpret_cast<UnitNameFn>(m.unit_name) : nullptr;
   }
   bind_key_actions();
+  bind_automap_closers();
   g_cure_failed = false;
   g_bound = g_get && g_set && g_server_lookup;
   logf("game: stat helpers %s (base getter %s), unit lookups %s/%s, online check %s", g_get && g_set ? "bound" : "MISSING",
@@ -414,15 +449,29 @@ bool bind() {
        "take-out %s, identify %s, pet lookup %s",
        has_item_handover() ? "bound" : "MISSING", has_socket_takeout() ? "bound" : "MISSING",
        has_identify() ? "bound" : "MISSING", has_pet_lookup() ? "bound" : "MISSING");
+  logf("game: item requirements: the restricted-socket test %s, a player's mercenary %s, the items worked out again %s",
+       has_restricted_test() ? "bound" : "MISSING", has_pet_of_type() ? "bound" : "MISSING",
+       has_items_refresh() ? "bound" : "MISSING");
   logf("game: key search %s (key item type 0x%X), map reveal %s, automap save %s", has_key_check() ? "bound" : "MISSING",
        sites::key_item_type(), has_map_reveal() ? "bound" : "MISSING",
        automap_saves_any_size() ? "has the checked cell count" : "NOT CHECKED");
   logf("game: on the map: a tile's add %s, a cell's insert %s, the unit draw's transform, marker and name %s",
        has_map_tiles() ? "bound" : "MISSING", has_map_objects() ? "bound" : "MISSING",
        has_map_draw() ? "bound" : "MISSING");
-  logf("game: key actions: Automap %s, Show Items %s, Show Items (Unfiltered) %s; display modes %s",
+  char closers[48] = "no panel";
+  if (!sites::derived(sites::dPanelRules)) {
+    std::strcpy(closers, "NOT KNOWN");
+  } else if (g_automap_closers) {
+    std::strcpy(closers, "panel");
+    for (int p = 0; p < kPanels; ++p) {
+      const size_t n = std::strlen(closers);
+      if (g_automap_closers >> p & 1) std::snprintf(closers + n, sizeof(closers) - n, " %d", p);
+    }
+  }
+  logf("game: key actions: Automap %s, Show Items %s, Show Items (Unfiltered) %s; display modes %s; the game closes "
+       "the automap as %s opens",
        key_binding_note(kKeyAutomap), key_binding_note(kKeyShowItems), key_binding_note(kKeyShowItemsUnfiltered),
-       g_name_display[0] && g_name_display[1] && g_setting_value ? "bound" : "MISSING");
+       g_name_display[0] && g_name_display[1] && g_setting_value ? "bound" : "MISSING", closers);
   return g_bound;
 }
 
@@ -866,18 +915,36 @@ Cured cure_state(void* game, Unit* u, int state) {
 bool has_state_test() { return g_state_on != nullptr; }
 bool state_on(Unit* u, int state) { return u && g_state_on && state >= 0 && g_state_on(u, state) != 0; }
 
-int unit_level_id(Unit* u) {
+void* unit_level(Unit* u) {
   // The room as the game's room getter (0x34B440) finds it: players, monsters and missiles walk a path that keeps
   // it at +0x20, the others stand on one that begins with it.
   const uint32_t type = unit_type(u);
-  if (!u || type > kTile) return -1;
+  if (!u || type > kTile) return nullptr;
   const uintptr_t path = mem::read_ptr(reinterpret_cast<uintptr_t>(u) + kUnitPath);
   const bool walks = type == kPlayer || type == kMonster || type == kMissile;
   const uintptr_t active = path ? mem::read_ptr(path + (walks ? kPathRoom : 0)) : 0;
   const uintptr_t room = active ? mem::read_ptr(active + kActiveRoomDrlgRoom) : 0;
-  const uintptr_t level = room ? mem::read_ptr(room + kRoomLevel) : 0;
+  return room ? reinterpret_cast<void*>(mem::read_ptr(room + kRoomLevel)) : nullptr;
+}
+
+int level_id_of(void* level) {
   int32_t id = -1;
-  return level && mem::read_safe(level + kLevelId, &id) && id > 0 ? id : -1;
+  return level && mem::read_safe(reinterpret_cast<uintptr_t>(level) + kLevelId, &id) && id > 0 ? id : -1;
+}
+
+void* level_drlg(void* level) {
+  return level ? reinterpret_cast<void*>(mem::read_ptr(reinterpret_cast<uintptr_t>(level) + kLevelDrlg)) : nullptr;
+}
+
+int unit_level_id(Unit* u) { return level_id_of(unit_level(u)); }
+
+void* room_built(void* room) {
+  return room ? reinterpret_cast<void*>(mem::read_ptr(reinterpret_cast<uintptr_t>(room) + kRoomActive)) : nullptr;
+}
+
+uint8_t game_bank(void* game) {
+  uint8_t bank = 0;
+  return game && mem::read_safe(reinterpret_cast<uintptr_t>(game) + kGameDataCtx, &bank) ? bank : 0;
 }
 
 bool has_town_travel() {
@@ -1024,6 +1091,31 @@ int pet_type(Unit* player, uint32_t unit_id) {
   return g_pet_type(player, unit_id);
 }
 
+bool has_restricted_test() { return g_restricted != nullptr; }
+
+// The arguments the requirement test passes it (it walks the unit's worn items and the item's sockets, and asks no
+// more than that: a unit without an inventory answers no).
+bool restricted_socket(Unit* unit, Unit* item, int body_location) {
+  return g_restricted && unit && unit_type(item) == kItem && g_restricted(unit, item, body_location);
+}
+
+bool has_pet_of_type() { return g_pet_of_type != nullptr; }
+
+// The lookup asks the player's data first, and asserts on a unit that is no player with its data (as the pet lookup).
+Unit* pet_of_type(void* game, Unit* player, int type) {
+  if (!g_pet_of_type || !game || type <= 0 || unit_type(player) != kPlayer ||
+      !mem::read_ptr(reinterpret_cast<uintptr_t>(player) + kUnitData))
+    return nullptr;
+  return g_pet_of_type(game, player, type, 0);
+}
+
+bool has_items_refresh() { return g_items_refresh != nullptr; }
+
+void refresh_unit_items(void* game, Unit* unit) {
+  const uint32_t type = unit_type(unit);
+  if (g_items_refresh && game && (type == kPlayer || is_mercenary(unit))) g_items_refresh(game, unit, nullptr, 0);
+}
+
 bool has_identify() { return g_identify != nullptr; }
 
 // The game's own identify, with the argument an Identify scroll and Cain pass (1: the player identifies its own item).
@@ -1051,6 +1143,8 @@ bool carries_key(Unit* player) {
   }
   return false;
 }
+
+bool has_room_build() { return g_create_room != nullptr; }
 
 bool has_map_reveal() {
   return g_create_room && g_automap_room && g_level_def && sites::derived(sites::dAutomapLayer) && g_client_lookup;
@@ -1232,6 +1326,20 @@ int key_action_state(KeyAction a) {
     return -1;
   return on != 0;
 }
+
+int automap_held_closed() {
+  const uintptr_t vars = sites::derived(sites::dUiVars);
+  if (!vars || !sites::derived(sites::dPanelRules)) return -1;
+  for (int p = 0; p < kPanels; ++p) {
+    uint8_t open = 0;
+    if (!(g_automap_closers >> p & 1)) continue;
+    if (!mem::read_safe(vars + static_cast<uintptr_t>(p), &open)) return -1;
+    if (open) return 1;
+  }
+  return 0;
+}
+
+uint32_t automap_closers() { return g_automap_closers; }
 
 int item_name_display(KeyAction a) {
   if (!has_key_action(a) || a == kKeyAutomap) return kDisplayUnknown;

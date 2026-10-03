@@ -27,6 +27,7 @@ enum Scope : int {
   kLevelName,      // the level-name hook, per name asked
   kManaCost,       // the mana-cost hook, per cost asked
   kTick,           // the server tick, 25 times a second
+  kRoomFill,       // ... of it the rooms of an area built ahead for the game to fill, and what it made read
   kPresent,        // the present hook, once a frame: everything below it
   kOverlayFrame,   // ... the frame drawn over the game's (the health bars, the panel)
   kMapMarksDraw,   // the named enemies' part of the automap's draw of one unit (each unit the automap draws)

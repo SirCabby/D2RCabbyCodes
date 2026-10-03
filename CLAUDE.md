@@ -24,7 +24,9 @@ loader is the injection point every runtime mod uses).
   reveal builds the client's rooms and puts them on the automap, only through the game's own routines, on the
   thread the game itself does both on; and keeping the automap and Show Items between games presses the Automap
   and Show Items keys at a game's load, through the game's key-action table (D2RCore's wrappers where it has
-  them), on the thread the game runs its key bindings on. The item level (approved 2026-09-27) adds to the name the
+  them), on the thread the game runs its key bindings on (and, from 2026-10-03, the same presses once a cinematic of
+  the game's that closed the automap is over: asked as "when changing acts it seems the map gets closed even if it's
+  set to stay open"; no new call, the panel gate's rules read). The item level (approved 2026-09-27) adds to the name the
   game's item-name builder returns, in that hook on the thread that asks (UI), and brings the first of the plugin's
   two code patches: a branch of the server's item writer turned into a jump through the loader (`PatchJmpRel32`), for
   the session. The second (best affixes, approved 2026-09-27) points the rare affix step's two calls of D2RCore's
@@ -119,7 +121,40 @@ loader is the injection point every runtime mod uses).
   the map until I got close to it in the Flayer Dungeon Level 3", "the entrance to sewers level 2 also isn't showing
   up on the map"): the landmarks read a built room's own preset list (they read the preset part's, which the build
   empties of the room's units: Khalim's Brain chest and most other rooms' never came), and the sewer stairs of a
-  layout go on ahead (the game's rule shows them only once the lever opened them).
+  layout go on ahead (the game's rule shows them only once the lever opened them). Approved 2026-10-03 for the shrines
+  the game rolls ("we need to make sure we're not changing shrine placement beyond vanilla, but all areas need to be
+  able to get shrines, and I can't tell you each area one by one, you need to solve this yourself for all areas";
+  Joshua chose "Fill on area entry"): a rolled object exists nowhere before the game fills its room, and which ones an
+  area rolls goes by the order its rooms are filled in (the record: object groups), so no reading can say them
+  ahead. On the server thread (the tick), as the character enters an area whose object groups can roll an object with
+  an icon, each of its rooms not built yet is built with the game's CreateActiveRoom (the call the map reveal makes on
+  the client's side, here on the server's DRLG), a few a server frame; the game's own fill pass then fills them (no
+  fill is called). Their objects are read, and those with an icon put on the automap as the landmarks put theirs on.
+  Placement is the game's rolls and rules; the order is the area's room list's. The server keeps a room it built for
+  the rest of the game (its DRLG frees none: the record), so these rooms end as the rooms walked past do. Approved
+  2026-10-03 for the experience multiplier (asked as "update the experience cheat to go higher, 1000 if possible.
+  Also make sure the exp also works for the mercenary so they level up with me better"): the cap raised from 50 to
+  1000, and one hook, on the server thread, the hireling experience award (0x44F480; the kill exp region's three
+  calls are its only callers), which scales the local player's mercenary's gains under the same switch and
+  multiplier; nothing of the game's is called inside it but the original and a read of the receiver's experience
+  through the stat helpers. Both writers add the gain to a 32-bit total (the player's caps it at the level-99
+  figure with an unsigned compare, the hireling's doubles the amount and has no cap of the total), so both hooks
+  keep a scaled gain below the room the total has left: a sum past 2^32 would wrap and lower it. The hireling's
+  gain also keeps its callers' own ceiling (0x7FFFFF): its writer walks the level up with no bound but 98 and the
+  level setter none at all, so an unbounded award would take a fresh mercenary to 98 in one kill; within the
+  ceiling one award bursts at most a few levels past the player, where the game's own entry gate (no gain at or
+  above the player's level) holds it until the player passes it. Approved 2026-10-03 for ignore item requirements
+  (asked as "add a new cheat to ignore requirements from items so that a level 1 with no stats could use anything";
+  Joshua chose the hook with a refresh at a switch, class-only items kept with their class, and the mercenary too,
+  under its own switch): one hook, on any thread (the client's calls, the server's, D2RCore's), the game's requirement
+  test (0x36BC50), which for the local player (the server's unit or the client's copy), or its mercenary (the server's
+  by its AI record's owner, the client's copy by the client's pet list), under its switch answers as if level,
+  strength and dexterity were met: the three flags it hands back say met, and a no is replaced by the routine's later
+  tests asked again the way it asks them (the identified flag, a tome's quantity, the restricted-socket test 0x376110
+  called as the routine calls it, the class against the item type's row and, for a hireling, its Hireling row: reads
+  of the game's data tables). Nothing written. When a switch changes in a game, the tick has the game work that unit's
+  items out again with the cube's refresh (0x470C90), the mercenary found by the server's lookup of a player's pet of
+  a type (0x4FF1A0, the one its handlers of the mercenary's gear ask).
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -157,7 +192,8 @@ src/sites.*           signature table + resolver over the decrypted image; deriv
 src/game.*            typed wrappers over the stat helpers, unit readers (guarded), local-player identity, the
                       antidote's state cure
 src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, freeze/poison), kill decision, death
-                      penalties, mana cost, exp, item use (should-remove predicate, tome quantity), key use, item
+                      penalties, mana cost, exp (the player's award and the mercenary's), item use (should-remove
+                      predicate, tome quantity), key use, item
                       wear (a hit's, Impale's), item name (item level), the drop core, the quality step, the
                       property roll, the class item skill step, the superior step's test of a kind, the magic,
                       rare and crafted affix steps, the affix picker and
@@ -166,8 +202,8 @@ src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, 
                       menu, the cube's product routine, the item free and the socket contents' free, the protected-
                       stat test (god mode), the item notice (identify on pickup), the AI dispatcher, the enemy test
                       and the kept target's getter (passive pets), the killself timer (permanent revives), the
-                      automap's draw of one unit (named enemies on the map); the item writer patch, the rare step's
-                      picker calls
+                      automap's draw of one unit (named enemies on the map), the requirement test (ignore item
+                      requirements); the item writer patch, the rare step's picker calls
 src/cheats.*          switches (atomics), Status snapshot, why-not reasons for the panel
 src/movespeed.h       movement speed: the bonus in the player's base velocitypercent, put on top of the game's own
                       again wherever the base is not what the tick wrote (each game's character starts at 100, with
@@ -229,6 +265,11 @@ src/revive.*          permanent revives: the killself monster mod's timer not ru
                       (the hook on the timer, server thread), which pets by the game's own pet lookup; Revive's pet
                       type read from its Skills row (game thread, the tick); the rule is in the header
                       (tests/test_revive.cpp)
+src/requirements.*    ignore item requirements: the requirement test's hook (any thread) takes level, strength and
+                      dexterity as met for the local player, or its mercenary, and asks the routine's later tests
+                      again (the game's data tables read, the restricted-socket test called); a switch changed in a
+                      game, the tick has the game work that unit's items out again; the rule is in the header
+                      (tests/test_requirements.cpp)
 src/itemlevel.*       item level after an item's name: Items and ItemTypes rows classified per bank (game thread),
                       the level added by the item-name hook (UI thread)
 src/mapreveal.*       the area pass: the current area's rooms built and, as the switches ask, revealed on the automap
@@ -241,9 +282,14 @@ src/mapmarks.*        named enemies, landmarks and area names at exits on the ma
                       exits), and the hook on the automap's draw of one unit (a named enemy's red cross and name, its
                       mark kept where it was last drawn, the spawn spots, the exits' names of the player's area); the
                       rules are in the header (tests/test_mapmarks.cpp)
+src/roomfill.*        the shrines the game rolls, for the landmarks: an area entered (server thread, the tick), its rooms
+                      built for the game's own fill pass to fill, a few a frame; then the objects in them read and
+                      handed to mapmarks, which puts those with an icon on the automap (UI thread); each area once a
+                      game, only those whose object groups can roll an object with an icon
 src/remember.*        the automap and the two Show Items keys kept between games: read while playing (when a key,
                       a button or a panel says so), put back at a load by pressing the keys through the key-action
-                      table (UI thread, no hook)
+                      table (UI thread, no hook); what a cinematic of the game's does to the automap not recorded,
+                      and undone once it is over
 src/character.*       respec and skill/attribute presets: requests from the panel, carried out by the tick, the
                       presets file (cabbycodes.presets.txt beside the settings) written by the watchdog
 src/presets.*         the presets file format (text in, text out; tests/test_presets.cpp)
@@ -350,7 +396,7 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | D2GAME_PLAYER_ApplyStatRegen | 0x42E600 | (game, unit, a3, a4): every server frame per player (~25/s) |
 | a character's stats for a game | 0x52D770 / 0x420280 / 0x5311F0 | the base stats a character's new unit gets as a game takes it in: a new character's from its CharStats row (0x52D770: attributes, life, mana, stamina, level 1), a character read from its save (0x420280, the quests' "Woo!" header checked; life and mana), and 0x5311F0 on the load D2RCore runs (0x52E910, named only in D2RCore's routine table; gold capped, stamina full, the skills' hot keys). Each sets base stats 68 attackrate, 67 velocitypercent and 69 other_animrate to 100. No other routine of the game's writes a player's 67 (its writers: those three, the monsters' init 0x495500, a hireling's 0x543E90 (75), the debug routine 0x402BB0 on its own unit, and the client's 0xFED70, 0x1A33B0, 0x1A3940, 0x1A4150). Read: movement speed |
 | D2GAME_PLAYER_DeathPenalties | 0x424AC0 | (game, player, killer) -> u64: gold and experience loss |
-| PLAYER_AddExperience | 0x44F2E0 | (game, player, currentLevel, amount): caps at the level-99 total (unsigned), sets stats 29/13, levels up via 0x52DA30 + event 0xC; callers in 0x44A3B0..0x44A823 (kill exp; amount from 0x44ECE0, capped 0x7FFFFF) |
+| PLAYER_AddExperience | 0x44F2E0 | (game, player, currentLevel, amount): players only (0x34B9D0); the gain added to the 32-bit experience total (GetUnitBaseStat 13, `lea esi, [rdi+rax]` at 0x44F34B), capped at the level-99 total with an unsigned compare (`cmova` at 0x44F377: a sum past 2^32 wraps and lowers the total), sets stats 29/13, levels up via 0x52DA30 + event 0xC; callers in 0x44A3B0..0x44A823 (kill exp; amount from 0x44ECE0, capped 0x7FFFFF). Hooked: experience multiplier (the scaled gain kept below the room the total has left) |
 | D2Common_SKILLMANA_GetManaCost | 0x33AA00 | (u8 dataCtx, skillId, level) -> cost in 256ths: `(mana + lvlmana*(lvl-1)) << manashift`, min `minmana<<8`. No unit argument |
 | SKILLMANA_Consume -> GetManaCost | 0x4369FB | call site inside 0x436830 (D2RCore-patched entry); unit in rsi; return value ignored by both callers |
 | client mana check -> GetManaCost | 0x218937 | call site inside 0x2188B0; unit in rbx; cost <= 0 skips the check |
@@ -362,7 +408,8 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | player death | 0x42D020 | the mode setter with mode 0: from FinalizeDamage (0x44AF4A, the killed flag, not while the players' switch is on) and the `killme` console command (0x411E70) only; 0x42D2C0, the other setter, has no caller that gives it 0 as a constant (two pass the mode of a client's request, 0x4F3C70 and 0x4FDB40). Read: god mode |
 | damage returned | 0x4395E0 | (game, attacker, defender, D2Damage*, stat): Thorns, Iron Maiden and the Heralds' thorns (HeraldThorns, skill 428: missile_thorns_percent too): the stat's percentage of the hit's physical damage (+0x18, after the damage multiplier scaled it) goes back to the attacker through ExecuteEvents and FinalizeDamage, the attacker the defender. Run between a melee hit's ExecuteEvents and FinalizeDamage (0x44B2B0 -> 0x436FC0). Read: god mode |
 | 0x34B9D0 | | (unit) -> the unit type (so nonzero for non-players; used by Consume, AddExperience) |
-| 0x44F480 / 0x544F60 / 0x544AC0 | | hireling experience / level set (not the player) |
+| hireling experience award | 0x44F480 | (game, player, hireling, the hireling's level, amount; the fifth argument on the stack): nothing for an amount <= 0 or a hireling in none of the player's pet lists (0x4FF2D0 by its id), or whose hireling record (0x3965D0) is missing; only while its level is below the player's (GetUnitStat 12) and below max level - 1 (0x300C70: at 98 nothing is written); the amount doubled into the 32-bit experience total (GetUnitBaseStat 13, `lea ebp, [rax + rbx*2]`, SetUnitStat with **no cap of the total**), the client told (0x47BED0), the new level walked up the hireling record's exp curve (0x3C1AC0, record +0x20) and set (0x544F60, then 0x545530, unit event 0x62, the level-up event 0xC via 0x5881E0). Three callers, all in the kill exp region (0x44A565 / 0x44A7C8 / 0x44A980): the amount from 0x44ECE0 with the hireling's level, x 86/256 when the killer is not the hireling itself. The level set (0x544F60) clamps nothing: it writes the level the walk reached. Hooked: experience multiplier (the mercenary's gains; the scaled amount kept below half the room, as the writer doubles it, and at the callers' ceiling 0x7FFFFF, so one award bursts a few levels at most) |
+| 0x544F60 / 0x544AC0 | | hireling level set (not the player) |
 | 0x550C20 | | level-up-by-chunks utility (console/cheat path), not the award |
 | DesecrateGetCurrentScheduledZone | 0x35B380 | (bool* changed) -> zone record or 0: `_time64`, config for now, slot = (now - start) / ((duration + break) * 60), index from a seeded weighted pick (0x35C6B0, cached per slot), record = zones + index * 1000. Also called with 0 by the server at a game's join (0x483D0A, then apply kind 1). Called: all areas terrorized (switched off, the rotation's zone applied again) |
 | DesecrateGetConfigForTime | 0x35DB10 | (int64 utc, bool* changed) -> config record: +0 start, +0x10 duration min, +0x14 break min, +0x20 seed, +0x250 zones, +0x258 count; +0x18 / +0x1C the manual thresholds (deprioritize / removal), +0x268 the manual zone groups, +0x270 their count; records 0x298 apart in the loaded list (globals 0x2A9AE78/80). Called: all areas terrorized |
@@ -494,6 +541,11 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | Item Name Display settings | 0xE1780 / 0xE2600 | getters of the function-local setting objects (0x2A33CC0 / 0x2A33E30, raw value at +0xC, range 0..2) named "Item Name Display" / "Unfiltered Item Name Display" (the Settings.json keys; the game's options); value 0xD2E490 (setting) -> the value through its two converters (the key handlers compare the low byte): 0 Hold, 1 Toggle, 2 Timed. Called: the display modes |
 | automap settings at load | 0xD34C0 | reads AutoMapMode (0xE06A0: 0x2A2ADD0 = mode != 0, 0x2A2ADD5 = mode == 1), the fade/centre/party settings and "AutoMap Open On Load" (0xE05D0 -> 0x2A2CFA0) into globals; 0xD25B0 (called at load, 0xCBE52) opens panel 10 when Open On Load is set, and re-centres (the pan at 0x2A2CF80, two int32) |
 | panels (classic UI vars) | 0x2A2ADA0 | a byte per panel id (10 the automap, 0xC the ShowItemsPanel); open 0xCD7C0 (id, x), close 0xC7D30, toggle 0xCDE00, get 0xCE500 (`movsxd; lea; movzx; ret`, one of three identical getters over other tables). They refuse while the client player is dead or not a player, and past the conflict gate 0xD00B0 (matrix 0x229E930: closes panels the new one excludes); they post PanelManager Open/ClosePanel with the name from 0xC7AA0. Close-all 0xC8240 (the automap too with cl = 1). Read |
+| panel ids | 0xC7AA0 | (id) -> the D2R panel's name, a jump table of 32: 0 HUDPanel, 1 the inventory, 2 CharacterStatsPanel, 3 SkillSelect, 4 SkillsTreePanel, 5 ChatPanel, 9 PauseLayout(Garden), 10 AutoMap, 11 VendorPanelLayout, 12 ShowItemsPanel, 13 ImbueItemsPanel, 14 the quest log, 15 ScrollOfInifuss, 19 the waypoints, 20 MiniMenuPanel, 21 PartyPanel, 22 TradeLayout, 23 the message log, 24 the stash, 25 HoradricCubeLayout, 27 HelpPanel, 28 HelpButtonPanel, 30 HirelingInventoryPanel, 31 LootFilterOptionsPanel; 6..8, 16..18, 26 and 29 none (8 the NPC menu, 17 the cinematics'), so no PanelManager message for them. Read |
+| panel gate | 0xD00B0 | (new id, mode: 0 open, 2 toggle, force) -> al, asked by the open 0xCD7C0 and the toggle 0xCDE00 (`mov r8b, 1; mov edx, 2; mov ecx, ebx` at 0xCDE5D) before they change a UI var: a few panels by name first (chat, the pause menu while dead), then for each of the 32 panels that is open (the UI vars, `lea rdi` at its start) the rule of its row for the new one: the rules 0x229E930, a pointer per open panel to 32 int32 (static data, base-relocated), 0 none, 1 the open one closed (0xC7D30, with force), 2 and 3 the new one refused, 4 an NPC talk ended (0x10F150 / 0x10DE80). The automap's row (10): 1 only for 17, the cinematics' panel; the panels whose rows refuse the automap: 9 (2), 10 (3), 17 (3), 22, 24, 25, 27, 31 (2). Read (the rules, derived from the Automap key's toggle): kept between games |
+| close all panels | 0xC8240 | (cl: the automap too, dl: handed to each close) -> al whether one was: the 21 panels of its list 0x1CC2880 (1..5, 9, 11, 12, 14, 15, 17, 19, 21..27, 30, 31; Show Items' panel 12 only for a key in Hold mode), the automap only with cl = 1. Callers with cl = 1: leaving a game (0x8A610, 0x8AA90 the end screen), the Esc key 0x8DFA0 (others first; the automap only when nothing else was open), and the client's packet 0x62 for unit types 2, 4 and 6 (0x10EFF0). Not called |
+| cinematics in a game | 0xEF630 | ProgressionVideoHelperWidget::OnMessage (D2Client Video.cpp): "ProgressionMessage" / "PlayVideo" (the act let go 0x86A50, at an act change, asks the client's quest record for flag 0 of quests 6 and 7, 14 and 15, 22 and 23, 27 and 28: the first of a pair set, the second not) plays a video of the table 0x22A0FF0 (24 bytes: 2 act2/act02start, 3 act3/act03start, 4 act4/act04start, 5 act4/act04end, 6 d2x_intro, 7 act5/d2x_out; 0, 1 the menu's) and opens UI var 17 (0xCD7C0 at 0xEF8D0), whose gate closes the automap, then broadcasts "MoviePlayerMessage" / "Play"; "Cinematics" / "MovieComplete" closes var 17 (0xEFE86, 0xF0243), except after act04end in an expansion game, where d2x_intro follows with var 17 still open. The game never opens the automap again: a waypoint between acts plays none and leaves it open (the trace of 2026-09-29, 00:23:15). Read (var 17, through the gate's rules): kept between games |
+| packet 0x62 | 0x12B050 / 0x4799D0 | the client's handler (7 bytes: unit type, id) -> 0x10EFF0: a monster (1) selectable again and an NPC talk ended; types 2, 4 and 6 close every panel, the automap too. The server's builder 0x4799D0 (client, 0x62, type, id): from 0x545800 (type 1, units it walks; 7 callers, among them the move to a level's 0x488180 -> 0x502D00 -> 0x503290) and 0x424F30 (type 6, id 0), whose callers are a debug command 0x4189A0 and 0x5E5E80, the callback a quest's update 0x5E60F0 runs for every player of a classic game (Game +0x106 == 1) after a delay (then, with quest 26's flag 13, the move to level 103, the Pandemonium Fortress). Not called |
 | Automap key | 0x119D50 | (): unless a controller holds it back, toggle panel 10, then `mov ecx, 0Ah` + get, and a closed map is re-centred (0xD25E0). Id 8's key (0x119DA0) re-centres (keyboard) or opens the map and cycles AutoMapMode (controller). Called: through the key-action table |
 | key-action table | 0x22A7930 | 0x18 bytes per action id (the ids a .key file stores): +0 press, +8 release, +0x10/+0x11 flags, +0x12 held. Press dispatch 0x11FF30 (binding, table, force), release 0x1203A0 (the binding's first dword is the id); 0x11EC0E hands a binding to one or the other with the table in rdx. Ids: 7 Automap (no release), 8 the automap centre/mode, 37 Show Items (press thunk 0x11B460: a stub returning 0 into cl; release thunk 0x11C400), 67 Show Items (Unfiltered) (`mov cl, 1` thunks 0x11C450 / 0x11C460); ids 0..68. Called (press): kept between games |
 | D2RCore's key wrappers | ids 7 / 37 | the table entries hold `.maho` jumps (0x3E2B16C / 0x3E2B172) into D2RCore (RVA 0x2BFA60 / 0x2C1DF0 in D2RCore.dll, loaded at its base 0xC0DE5000000): the original press, then it remembers the automap's UI var / ((Item Name Display == Toggle) && byte [0]) for the session (D2RCore .data 0x7B0D38 / 0x7B15B0), the automap one clearing its pending restore. At a game's load (0x1CF032; also 0x2BF980 / 0x2C1CC0, callers not found) the restores run once the client player exists (0x2BF990 toggles with the original key until the UI var matches; 0x2C1CD0 in Toggle mode sets byte [0] and updates the panel). The memory starts empty, so on the first game of a run D2RCore closes the map the game's Open On Load just opened. Read (the entries are checked, then called) |
@@ -548,7 +600,7 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | automap: the marker decision | 0xD78F0 | (unit, &marker, &name kind) -> whether drawn: a player: the local one 0, the party 1 (name 0), another 5 (name 1), a dead one in state 7 marker 2; a monster (not dead, not 0x34F8D0): an NPC row (MonStats flags byte +0x3D & 2: interact) marker 6 with its name (kind 4); a pet: 3 yours, 4 the party's, 5 another's with its owner's name; under the reveal-all byte (0x2A2ADD4) every other monster marker 5 (class 0x216 6), no name; objects: a town portal (59) marker 7, a permanent one (60) too but in levels 111, 112, 117, 125..127, the stash (267) only its name (5). The sprite "AUTOMAP/Units" (hd/global/ui/automap/units.sprite: 8 frames of 70 x 36, crosses): 0 blue, 1 green, 2 magenta, 3 slate, 4 dark green, 5 red, 6 white, 7 yellow. D2RCore lists it (and the reveal) among the routines it binds, and calls neither. Read |
 | automap: reveal a room | 0xD6550 | (u8 bank, ActiveRoom, force, layer owner): the floor tiles (0x2EFB70 (room, &count): ActiveRoom +0x08, its +0x20 tiles, +0x28 count; 0x48 bytes a tile, +0x18 flags) each not flag 8, and seen (0x20000), the reveal-all byte or force, to the per-tile add onto the owner's +0x08; the walls (0x2EFDF0) onto +0x30; then a tail jump to its unit pass 0xD6680 (bank, owner +0x58): each unit of the room drawn on the screen already (unit flag 0x10000000, 0x349C60; set by the world's unit draw 0x1CC3B0 when it drew the unit) and not on the map yet (0x20000000, 0x349C20; set by 0x34DFD0), or all under the reveal-all byte: a monster by its MonStats2 row's cell (+0x118: in 3.3 only barricadetower's, 1258), an object by its Objects row's (0x38FD00 (bank, class), +0x164: 148 classes in 3.3, shrines 310, wells 309, waypoints 307, quest objects ...) with three rules: the stash (267, cell 319) only where the act of the room's level (`.maho` 0x3E2B5C8) is 2 or 3, the sewer stairs (366) only in mode 2, the valley waypoint object (402) only in level 74; the unit cell add 0xD52B0 (unit, cell, list): the unit's pixels / 10 plus (1, -3) as the key {u16 0, u16 cell, int32 x, int32 y}, the list insert 0xD1460 (list, {node, bool} out, key): a red-black tree that keeps a key once (0xD4B70 finds the place), nodes 0x30 bytes from the game's allocator. Called (the insert): landmarks on the map |
 | automap: a tile's cell | 0xD5160 / 0x32BDF0 | the per-tile add (u8 bank, tile, DRLG room, list): a tile on the map already (flag 0x40000) is left, else the flag set, the level type (0x3269B0: the level record's +0x34), the tile's graphics record's type +0x14, style +0x18 and sequence +0x1C (0x1460210 / 0x1460190 / 0x1460150) to the lookup 0x32BDF0, and a cell other than -1 put on the list at the tile's place (room +0x60 / +0x64 plus the tile's +0x08 / +0x0C, tiles to pixels 0x334EF0, / 10, +0x18 to y when the tile's +0x28 is 0x10 or more), key tag 0, through the list insert. The lookup: records {data, count} at 0x2A9A8C8, 0x20 bytes (+0 level type, +4 tile type, +8 style (0xFF any), +9 / +0xA the first and last sequence (0xFF at +9 any), +0xC cells, +0x1C how many), by level type the range [first, last) at 0x2A9A8E0 (int32 pairs); the first that fits; with a count of 1 or more one cell picked by the automap's own stream (0x2372A40, stepped every time), else the first. automap.txt's "Waypoint" rows (Acts 1..4: 19, one cell, 307) are a waypoint's floor tiles; Act 5's waypoints and the Arcane Sanctuary's are objects with the icon 307. Called (the per-tile add, for a tile the table gives the waypoint's cell; the table read, not queried): landmarks on the map |
-| a room's preset units | 0x3DE0E0 / 0x3DF600 / 0x3DBB60 | CreateActiveRoom's preset step (u8 bank, DRLG room), for a preset room (+0x74 == 2) whose flag bit 25 is clear: the room's +0x40 -> +0x08 is its preset part; when its DS1 (+0x10) is not loaded (0x3DCF10) the units are made (0x3DF600 (bank, part, the room's seed +0x30)): each of the DS1's (+0x98, next +0x10; type +0x20, class +0x04) copied (0x3DBB60: 0x30 bytes, type +0x20, class +0x04, x +0x08 and y +0x24 the DS1's plus the room's subtiles (+0x18 / +0x1C x 5), a path +0x18) and linked at the part's +0x58 by +0x10; some object classes (0xC4, 0x105 a half, 0x245 a quarter) and the layout's random monster places (0x21..0x23 past the super uniques) kept by the room's seed; a monster's class is a MonStats row below the table's count, then a super unique's row (count + index; the SuperUniques count 0x3971E0: data tables +0x1080). Then bit 25 set. Level 2's preset rooms of types 4..7 get a monster unit of their own (0x360BF0). The outdoor shrines and waypoints are preset rooms (D2RCore's PlaceOutdoorShrines / PlaceOutdoorWaypoint place lvlprest records, 0x32C360); the shrines and wells of objgroup.txt (dungeons) are made by the server when it fills a room, in no layout. **These are the part's units, not yet the room's**: CreateActiveRoom's build step then moves the ones that stand in the room into the room's own list (next row), so after a build the part keeps only other rooms' units. Read: landmarks, named enemies (until 2026-10-02 the part's list was read after the build, and most rooms' units never came) |
+| a room's preset units | 0x3DE0E0 / 0x3DF600 / 0x3DBB60 | CreateActiveRoom's preset step (u8 bank, DRLG room), for a preset room (+0x74 == 2) whose flag bit 25 is clear: the room's +0x40 -> +0x08 is its preset part; when its DS1 (+0x10) is not loaded (0x3DCF10) the units are made (0x3DF600 (bank, part, the room's seed +0x30)): each of the DS1's (+0x98, next +0x10; type +0x20, class +0x04) copied (0x3DBB60: 0x30 bytes, type +0x20, class +0x04, x +0x08 and y +0x24 the DS1's plus the room's subtiles (+0x18 / +0x1C x 5), a path +0x18) and linked at the part's +0x58 by +0x10; some object classes (0xC4, 0x105 a half, 0x245 a quarter) and the layout's random monster places (0x21..0x23 past the super uniques) kept by the room's seed; a monster's class is a MonStats row below the table's count, then a super unique's row (count + index; the SuperUniques count 0x3971E0: data tables +0x1080). Then bit 25 set. Level 2's preset rooms of types 4..7 get a monster unit of their own (0x360BF0). The outdoor shrines and waypoints are preset rooms (D2RCore's PlaceOutdoorShrines / PlaceOutdoorWaypoint place lvlprest records, 0x32C360); the shrines and wells of objgroup.txt are made by the server when it first fills a room (0x4042A0 -> 0x503790, as a player comes near; the game fills a far room only for a town portal's other end), in no layout: every area whose levels.txt ObjGrp names a group with them (3.3: Act 3's jungle (31 Jungle Wells, 43 jungle shrines), Kurast (43, 76) and Travincal (61, 62), Act 4's (46), Act 5's (99 .. 106, 111 .. 115), every dungeon's); Act 1's and Act 2's outdoor groups have none (rogue corpses, chests, rocks, jugs). **These are the part's units, not yet the room's**: CreateActiveRoom's build step then moves the ones that stand in the room into the room's own list (next row), so after a build the part keeps only other rooms' units. Read: landmarks, named enemies (until 2026-10-02 the part's list was read after the build, and most rooms' units never came) |
 | a room's own preset units | 0x328FD0 / 0x3F38D0 / 0x3DE420 / 0x360BF0 | the build step (u8 bank, DRLG room), CreateActiveRoom's for a room whose flag bit 20 is clear: the near links (0x3608A0, when the room has no near rooms yet), the static grids 0x3F38D0 (a room of type 1 0x3F95E0; type 2 a tail jump to 0x3DE420, which after the grids moves every unit of the part's list (+0x58) that stands in the room (0x3605B0, the room's subtiles) into the room's own list (+0x98, by +0x10), x and y less the room's tile x and y (+0x60 / +0x64) times five), the map tiles 0x3F3930, the ActiveRoom (0x326480). The room preset add 0x360BF0 (bank, room, type, class, mode, x, y): a 0x30-byte unit {+0 mode, +4 class, +8 x, +0x10 next, +0x20 type, +0x24 y} put on the same list; the maze steps (0x3DF2E0, 0x3DF540, 0x3E06F1, 0x3F40DE) and the warp tiles (0x3F4670) add theirs so. Read: landmarks, named enemies, area names at exits |
 | near links | 0x3608A0 / 0x3614C0 / 0x361750 | (u8 bank, DRLG room), from the build step and 0x328DA0: the room's near rooms of its own area (0x3614C0: the array at +0x10 cleared (+0x18 count), the area's rooms (+0x90 -> +0x10, next +0x48) within 6 tiles of it, sorted), then for each of its flags' bits 4..11 (`test [room+0x50], 0xFF0`; none for level 133) the area that vis slot names (0x360800) - made (GetLevel 0x3267C0) and its rooms made (0x3271C0) when they are not -, and 0x361750 (bank, room, slot, the other area's first room, its slot back, the warp id 0x3DAAD0): for a warp (id not -1) the first room of the other area whose flags have the slot back is pushed among the near rooms and gets a link node (0x30 bytes: +0 that room, +8 the next, +0x10 1, +0x20 the warp's record 0x3DA970 (bank, area, slot, 'b'); the room's +0x78 the list's head); for a walk-through (id -1) every room of the other area with the slot back within 6 tiles is pushed among the near rooms, no node. Last, flag 0x800000 for a room whose area is not one 0x327850 says and that has a near room in one. Read (the near rooms, the links): area names at exits |
 | vis and warp slots | 0x360800 / 0x3DAAD0 / 0x326A80 / 0x3F1C60 / 0x3EDE60 | an area's eight vis slots (0x360800 (bank, DRLG, area) -> int[8]) and their warp ids (0x3DAAD0 (bank, area record, slot)): the DRLG's own list first (+0x118: records 0x50 bytes {+0 area, +4 vis[8], +0x24 warp[8], +0x48 next}, made by 0x326A80 as a copy of the area's LevelDefs row, +0x48 vis, +0x68 warp), else the row's. The outdoor link generator 0x3F1C60 (an act's outdoor areas placed by its link table: each area's place and size into its record, +0x24 x, +0x28 y, +0x2C width, +0x30 height, tiles; 0x327650 sets them from LevelDefs for the others) gives two linked areas a vis slot each other's with warp -1 (0x327760), unless the DRLG's +0x870 byte is 4. levels.txt names no vis between outdoor areas (Blood Moor's slots 3..6 are the Den of Evil's four ways in, warps 0..3). An outdoor area's room flags (0x3EDE60, by its 8-tile grid cell): every cell of the area's edge toward a linked area gets that area's slot bit - the whole border, not the gap. Read (through the near links): area names at exits |
@@ -556,9 +608,22 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | a warp tile's preset unit | 0x3F4670 | (bank, DRLG room, tile x, y, tile flags, orientation 0xB right else left): the record for the area, the slot in the tile's flags (>> 0x14 & 0x3F) and the direction; a unit of type 5 put on the room's list by the room preset add, its class the record's id (+0x2C), at the tile less the room's tile x and y, times five, plus the record's offsets. Read: area names at exits (a type 5 preset unit with a link whose record has its id is the warp's tile) |
 | collision map | 0x366250 / 0x2EFB30 | (room, x, y, mask) -> the flags at a subtile (0x27 when no room has it): the room that holds the point (0x38DFB0: 0x2F0680 on the ActiveRoom's subtiles +0x80 .. +0x8C, else its near rooms 0x2EFDE0), its collision map (0x2EFB30: ActiveRoom +0x38) {+0 x, +4 y, +8 width, +0x0C height (subtiles), +0x10 / +0x14 tiles, +0x20 u16 flags, row by row}. The bits (D2's): 1 a wall, 2 sight, 4 missiles, 8 a player does not cross, 0x20 no floor, 0x400 an object, 0x800 a door, 0x1000 a unit; the game places a player with the mask 0x1C09 (0x491CA0, 0x2EF8B0). Read: area names at exits (walkable: neither 1 nor 8) |
 | the sewer stairs, stairs | 0x5E9DA0 / 0x5A11A0 / 0x590160 | object operate functions 44 (Act 3's sewer stairs, class 366: only in mode 2, open, then 0x5A11A0: the player warped (0x491FF0) through the tile unit (type 5) in the stairs' room) and 47 (the "stair" objects 194 / 195: opened, then through the room's tile unit too). The lever (class 367, OperateFn 45) has an icon of its own (cell 304). Act 3's Sewers Level 1 (92) names no vis slot for Level 2 (93): its four are the Bazaar's and Upper Kurast's (warps 58 / 59); the way down is the stairs over warp 60 ("Act 3 Sewer Down", NoInteract). Read: landmarks (the stairs put on ahead) |
+| server: the fill pass | 0x408670 / 0x406550 | the server's frame (0x406550: the frame counter, each act's rooms near its players (0x352410, 0x351DF0), then 0x408670, the events 0x48B5C0, D2RCore's step, ..., every 11 frames each act's level free 0x2EFFF0) runs the fill pass once: for each act of the game (game +0x190, the data tables' +0x108 acts), while the act's +0x84 says rooms were added (cleared, 0x2F0400), every room of its list (head +0x18, 0x192B20; next ActiveRoom +0xB0, 0x2EFC50) down to the head of the walk before: D2RCore's PopulateRoomSpecialMonsters (`.maho` 0x3E2B5C2), then for a room not filled (ActiveRoom +0x54 & 1, 0x2F0600) its presets (0x48F190), random monsters and saved units (0x503790), object groups (0x510F00) and terror step (0x50ACF0), the bit set (0x2F04E0), and +0x54 \| 2 (0x2F0440). A room built goes on its act's list: CreateActiveRoom's ActiveRoom maker 0x326480 calls D2RCore's AllocateActiveRoom (`.maho` 0x3E2B5BC, D2RCore 0x80E000), whose original 0x2EF340 allocates 0xB8 bytes, seeds +0xA0 from the DRLG room's stepped seed, links the room at the act's head (+0xB0 the old head) and sets the act's +0x84. So a room the plugin builds is filled by this pass. Checked (signature, the steps and the bit): rooms filled ahead |
+| far room built and filled | 0x328900 / 0x2F0810 / 0x4042A0 | 0x2F0810 (bank, act, x, y): the act's DRLG (+0x70) to 0x328900 (bank, DRLG, x, y): the DRLG room at that place (0x327400) built as CreateActiveRoom builds one; 0x4042A0 (game, ActiveRoom) fills it at once (the pass's steps). The game's own far room: a town portal's other end (0x490070) and the console's warp (0x4100E0). Not called (the pass fills the rooms the plugin builds) |
+| object groups | 0x510F00 / 0x512DB0 / 0x38FD90 | (game, ActiveRoom), the fill's third step: the Levels row (0x32C4A0), a record of the level's (0x512DB0 (game, level): +4 the rooms filled so far, counted here, +8 the level's rooms (0x2EFA20), +0x10 a flag); unless Levels +0x178 sends it to 0x511580 first: for each of the eight groups (Levels +0xED, a byte; its chance +0xF5) a step of the room's seed (0x2EFBF0: the ActiveRoom's {lo, hi}), lo % 100, set to 100 (no roll) past three quarters of the level's rooms filled while the record's +0x10 is 0 and the group's row says so (+0x127); below the chance, another step, the group's entry by its PROBs (ObjGroup rows 0x30 bytes: +0 the classes, +0x20 DENSITY, +0x28 PROB; 0x38FD90 (bank, group)), the object's Objects row's PopulateFn (+0x15D, the table 0x239BC10) called with (game, room, the density, the class, 100). The random monsters (0x505D70) step the same seed before it, and the populate functions find free spots among the units already in the room. So what a room rolls goes by what its monsters took and by the order the level's rooms are filled in: nothing can say it before the game fills the room. 3.3: 95 levels can roll an object with an icon (tests/test_mapmarks.cpp; shrines 310, wells 309, Act 5's outdoor waypoints 307 in group 112); Act 1's and Act 2's outdoor groups have none. Read: rooms filled ahead |
+| room activation levels | 0x328F60 / 0x328DA0 / 0x328710 / 0x328680 / 0x328780 / 0x328BF0 | a DRLG room's counts at four levels (+0x28 short[4]) and its level (+0x70: 0 a player's own room, 1 built (its ActiveRoom made, filled by the pass), 2 and 3 its data loaded, 4 none); each level's room list in the DRLG (+0x130 + level x 0x1C0, linked by +0x38 / +0x1B0). 0x328F60 (bank, room, level): the room's near rooms one level further (0x328DA0, recursive, levels up to 3), then the room at its level (the table 0x2372700: 0 0x328270, 1 0x3282F0 (builds: 0x328FD0), 2 0x3283D0 (builds only with a level-1 count), 3 0x328560 (loads tiles and presets)). A player's room change 0x328710 (bank, old, new) holds the new one at 0 and lets the old one go; the client's room packets hold and let go at level 1 (0x2EF320 -> 0x328680, 0x2EF700 -> 0x328780). Going down: 0x328620 for levels 0..2 (the level from the counts), 0x328630 for 3, which frees the room (0x3F3AA0: its ActiveRoom through 0x2F0110, which unlinks it and hands its units over; its data) only when its level comes to 4 and the DRLG's +0x110 bit 0 is set: the act maker 0x2EF1C0's fourth argument, 1 for the client (0x86BC0), 0 for the server (0x48AA50). So the server frees no room: a room it built stays built, its units with it, and its level free (0x2EFFF0 / 0x327370: a level no player is in or next to, +0x0C 0, after a countdown +0x1FC; 0x327E70 wants every room at level 4 without the built bit +0x50 & 0x100000, set by 0x3F3930; then 0x327C40) never comes for a level with a built room. Read: rooms filled ahead |
+| a room's units | 0x2EFD90 / 0x34B4A0 | an ActiveRoom's first unit (+0xA8) and a unit's next in its room (+0x160): the pick-up's walk over the rooms near the player (0x471997 ..). ActiveRoom +0x54: bit 0 filled (presets and objects), bit 1 its monsters (0x2F05F0 / 0x2F0440). Read: rooms filled ahead |
 | a room's monsters made | 0x503790 | (game, ActiveRoom): the server's population of a room, the first time it is activated (from 0x4042A0, which makes a room's units and wakes its sleeping ones, and 0x408670): the random monsters (0x505D70, whose packs make random uniques and champions through 0x49AF30 -> 0x49EDB0) and the layout's preset monsters (0x48DC50 -> 0x50A050: a super unique through its maker 0x499BA0). So nothing knows of a random unique or a Herald before a player has come near its room. Read: named enemies (why they are marked from when they are first seen) |
 | SuperUniques rows | 0x499BA0 | data tables +0x1078 (count +0x1080), 0x3C bytes: +0x00 u16 the row, +0x02 u16 the name's string id (the game fills it in at its load; 0 in the loader's compiled rows), +0x08 the MonStats class, +0x0C hcIdx (the maker's switch on special ones). The maker (0x499BA0) sets the monster's kind 2 and 8 and its super unique id (0x38E810: monster data +0x2A; the client's monster from its packet 0x98FA0 too). Read (the name): named enemies |
 | a static path's place | 0x34D540 | (unit, room, x, y): +0x00 the room, +0x10 / +0x14 the subtiles, +0x08 / +0x0C the pixels (0x334E00: (x - y) * 16, (x + y) * 8). So a layout object's icon key is the one the reveal gives its unit. Read |
+| item requirement test | 0x36BC50 | (item, unit, equipping, int* strength met, int* dexterity met, int* level met, body location) -> nonzero when the unit can use the item. The three flags set to 0, then for an item (type 4) with its Items row (0x314110): strength, the row's +0x11A plus a percent of it (the item's stat 91 item_req_percent and 0x33D4F0 (unit, item, 0, 6), both D2RCore jumps), 10 less for an ethereal item (0x400000), against the unit's stat 0 (nothing at 0 or below), and with `equipping` the item's own strength (0x3768C0, when it has a stat list 0x2F8120) not counted; dexterity the same with +0x11C and stat 2; level, D2RCore's level requirement (0x376DE0, `.maho` ReadWideItemLevelRequirement: the item's, its sockets', a runeword's; -1 none) against stat 12; the flags written. Then, each refusal a jump to the one `xor eax, eax`: the identified flag (item data +0x18 & 0x10), a tome (type exactly 0x12, 0x372C90) with a quantity (stat 70) of 1 or more, the restricted-socket test 0x376110 at the body location asked or at both of the type's (ItemTypes +0x0A / +0x0B, 0x36A4B0; both must refuse), the class: ItemTypes +0x20 below 8 is that class's alone: a player must be of it (0x349860), a monster passes unless a hireling (0x3AF240), which must have the class 0x3473D0 says, any other unit fails. Its entry (`mov [rsp+20h], r9`) is hookable. 18 callers in the exe: the client's (0x159D20 what the mercenary can wear, 0x1C8050, 0x1E71C0, 0x2CACF0 an item given to the mercenary, the inventory's red background 0x2C9940, the tooltips 0x2BD480 / 0x2BF1B0 / 0x1454B80 with the flags for the requirement lines' color), both sides' (0x36AE00 a charm usable, the wear tests 0x36B6A0 / 0x36E360 / 0x388430), the server's (0x42AA10 the corpse's items put back on, 0x471E90 the inventory move, which takes back a move that puts an item on the body that fails, 0x475760 whether a worn item's stats count, 0x4C0E20 / 0x4C3DC0 the mercenary's gear handlers, 0x526800); and D2RCore's CheckInventoryItemRequirementsForDisplay, IsCharmUsable and CheckInventorySlotItemRequirements (its routine table: the pointer at .data 0x6FFA60, the RVA beside it), reached through `.maho` 0x3E2B298 / 0x3E2B61C / 0x3E2B490. Hooked: ignore item requirements |
+| restricted sockets | 0x376110 / 0x371FE0 / 0x373300 / 0x375FA0 | (unit, item, body location) -> al: the item's socketed items (its own inventory, 0x371FE0; only for a base that can have sockets) of a restricted type (ItemTypes +0xE6, the Restricted column: 3.3's Colossal Jewel, cjwl, alone) listed; another item the unit wears (body locations 1..12, not the one at the location asked, which is being replaced) with one of the same type (0x373300) -> 1. So two Colossal Jewels are never worn at once. Called: ignore item requirements (the way the test calls it) |
+| data tables and their rows | 0x300A90 / 0x314110 / 0x372C90 / 0x36A4B0 | the data tables of a bank: a pointer per bank 16 bytes apart in the array 0x2A9A580 (banks 0 .. 3); Items rows {rows, u64 count} at +0x15A0, 0x1C0 bytes, an item's type the row's +0x12E (int16); ItemTypes at +0x1348, 0xE8 bytes, the game's type ids (row 0 the blank "Any", 18 book; the loader's compiled itemtypes.bin has the same rows): +0x0A / +0x0B BodyLoc1 / BodyLoc2 (bodylocs.txt's rows: 1 head .. 10 gloves), +0x20 the Class (charstats' order less its divider: 0 Amazon .. 7 Warlock; 0xFF none), +0xE6 Restricted. Read: ignore item requirements |
+| Hireling rows | 0x396730 / 0x3AF240 / 0x3473D0 | 0x396730 (bank, expansion, monster class) -> the first row of the bank's Hireling rows (data tables +0x520, count +0x528, 0x150 bytes) whose +0x08 is the class and +0x00 the version (100, or 0 in the classic bank). 0x3AF240 (unit) -> a monster's row's +0x0C (the Act: 0 for a monster that is no hireling); 0x3473D0 (unit) -> for a monster with unit flag 0x200 (+0x124) its row's +0x8C (equivalentcharclass, int8: the Rogue's 0 Amazon, the Barbarian's 4, -1 none), else 8. Read: ignore item requirements |
+| mercenary flag | 0x34E2F0 / 0x34FBA0 | unit flag 0x200 (+0x124) set (0x34E2F0) on the server by the hireling's level set 0x544AC0, on the client by 0x1A28A0 for every hireling it is told of (the monster packet's handler 0x98FA0, the pet list's 0x13A660); tested by 0x34FBA0. Read |
+| client pet list | 0x13ABC0 / 0x2A4DC10 | (player, pet type, any) -> the id of the player's pet of that type, -1 none: nodes from the head 0x2A4DC10 (+0x04 pet type, +0x08 the pet's id, +0x0C its owner's id, +0x20 nonzero for a gone one, which counts only with `any`, +0x30 the next). The client's mercenary check 0x159D20 asks it with type 7 (pettype.txt "hireable") and the local player, then the client's unit of that id (0x9A5D0, a monster) and the requirement test. Read: ignore item requirements |
+| server pet of a type | 0x4FF1A0 | (game, player, pet type, any) -> the unit (0x48FE80, a monster) of the first node of the player's list of that type (player data +0x98, 0x20 bytes a type) that is not gone (node flag bit 0) unless `any`. The mercenary's gear handlers 0x4C0E20 / 0x4C3DC0 ask it with 7 and 0. Called: ignore item requirements (the mercenary's items worked out again) |
+| items worked out again | 0x470C90 / 0x470CA0 / 0x475760 | 0x470C90 (game, unit, a3, a4): `mov r8d, r9d` and a jump to 0x470CA0 (game, unit, tell the client): for a player or a unit with the mercenary flag, the inventory's charms that D2RCore's IsCharmUsable and 0x475760 pass enabled; every worn item (body locations 1..10) disabled (item flag 0x4000, its stats off, 0x475020), then each that is not broken and passes 0x475760 enabled again (0x475090), over and over until nothing changes (so one item's strength counts for another's requirement); then the item skills. 0x475760 (unit, item) -> the requirement test, then a pairing test (0x371E90). Run by a game's load (0x52E910, the load D2RCore runs, and 0x408EA0, a client's join), an attribute point spent (0x4B3C70), the respec, a purchase, a quest reward, and by the inventory moves (0x471500, 0x471E90, 0x472590) and the identify routine through 0x470CA0. Called (0x470C90): infinite cube ingredients, ignore item requirements |
 Client map (UI thread): a dynamic path's room at +0x20 is an ActiveRoom; ActiveRoom +0x18 the DrlgRoom (0x192B20),
 DrlgRoom +0x10 near rooms (+0x18 count), +0x48 next in its level, +0x50 flags, +0x58 ActiveRoom, +0x60/+0x64/+0x68/+0x6C
 tile x/y/w/h, +0x74 type, +0x90 level; Level +0x10 first room, +0x1C8 the DRLG, +0x1F8 id (0x360FC0); DRLG +0x830
@@ -1311,6 +1376,52 @@ usable (the unit lookup has its two copies), both once, the removal 0x4FFD30, th
 tests/test_revive.cpp holds the rule, and every summoning skill's compiled +0x112 to its pettype.txt row (37 skills;
 Revive alone "revive", 6).
 
+Ignore item requirements (approved 2026-10-03; asked as "add a new cheat to ignore requirements from items so that a
+level 1 with no stats could use anything"; Joshua chose the hook with a refresh at a switch over the hook alone,
+class-only items kept with their class, and the mercenary too, under its own switch; the panel's Cheats section after
+Infinite cube ingredients, `ignore_requirements` / `ignore_requirements_mercenary`, the console's `requirements` /
+`mercrequirements`). What the game does (the record: item requirement test): every test of whether a unit can use an
+item, on either side and D2RCore's, asks one routine, which asks level, strength and dexterity first and then the
+identified flag, a tome's quantity, the restricted sockets and the class.
+- the routine is hooked (any thread). With both switches off it is the game's, flags and all. For the local player
+  (game::is_local_player: the server's unit or the client's copy), or its mercenary (the mercenary flag, and the AI
+  record's owner on the server or the client's pet list's mercenary of the local player on the client), under that
+  unit's switch, the original is called with flags of the hook's own, and then the three flags it hands back say met
+  and a no is the routine's later tests asked again the way it asks them (requirements.h: answer, restricted,
+  class_ok): the identified flag, the tome's quantity, the restricted-socket test itself, the class against the item
+  type's ItemTypes row and, for a hireling, its Hireling row. A no with all three met was a later test's and stays.
+  The rows are read where the game's getters read them (the data tables' array), on whatever thread asks, as the
+  original has just read them;
+- so the client puts the item on, the server's inventory move lets it stay, the server's refresh counts what it gives
+  (a charm's too, through D2RCore's IsCharmUsable), a tooltip's requirement lines are not red (the tooltip builders
+  color them by the flags), and the inventory's background is not red;
+- when a switch changes in a game, the tick (server thread) calls the cube's refresh (0x470C90) on that unit: the
+  game takes every worn item's stats off and puts back those the test passes, so what is worn counts, or stops, at
+  once (a dead character's once it is alive again; the mercenary only while it is with you, found by 0x4FF1A0 with
+  pet type 7, and else as it comes back, when the game works its items out itself). A game's load works them out by
+  itself, so the first tick of a game only takes the switches as they are;
+- switched off, the game's own rule is back: what is worn stays on, and an item whose requirements are not met
+  gives nothing (red). Nothing reaches a save but what the game itself writes.
+Class-only items stay with their class: the game's data has hand-to-hand animations (cof files `..ht1` / `..ht2`) for
+the Assassin alone, so a claw on another class would have none, and how another class's items look on a character is
+something the game never shows (Joshua's choice, asked with the hook). sites.cpp finds the routine, the client's
+mercenary check and the server's pet lookup by signature (each once), reads the tail's three places of the routine
+(each refusal a jump to the same `xor eax, eax`), the getters' tables and layouts, the client's pet list from the
+lookup the mercenary check calls, and checks that the cube's refresh asks the test; without the routine's tail as
+read both switches are greyed, without the mercenary's parts its switch alone. Checked without the game (scratchpad
+harness2/, 2026-10-03): the game's own routine run from the dump mapped at the game's base, with MinHook on its entry
+(as the loader hooks it) and requirements::test as the detour, over data tables made from the loader's compiled rows
+(weapons, armor and misc as the Items rows, ItemTypes, Hireling), its four D2RCore entries stubs (a unit's stats, the
+item's requirement percent twice, the level requirement), a client pet list of the test's: 692 items x 40 units
+(players of each class, yours and another's; mercenaries of each hireling class and a monster that is none, the
+server's of yours, the client's copy, another's; a summon of yours) x identified or not x equipping x three body
+locations x two tome quantities x each switch: 1,992,960 cases, none off. With the switches off, the game's answer
+and flags; for your units under their switch, the game's own answer with level, strength and dexterity far above
+any requirement, and the flags met; for every other unit, the game's (124,356 answers turned to yes, 171,804 kept no
+by a later test). tests/test_requirements.cpp holds the rule, and the compiled ItemTypes and Hireling rows to their
+txt (the class and body locations; the version, monster class, act and equivalentcharclass) and pettype.txt's row 7
+to "hireable".
+
 Map reveal: on the UI thread (the UI pump), under the switch, when something says the player may stand in an area
 not revealed yet (mapreveal::arm: the loader's LevelChanged with its level, ActChanged, GameJoined, LocalPlayerReady,
 PlayerResurrected; a switch or number changed in the panel or the console), from then on every frame until that area
@@ -1341,6 +1452,26 @@ gone (PanelManager Close/UnloadPanel LoadScreenPanel; 10 s without it) and at le
 for those seconds); then tracking
 starts. Pressing through the table matters: D2RCore's wrappers update its session memory, so its own restore agrees;
 opening the panel directly (0xCD7C0) would leave its memory stale and it would close the map again.
+
+Cinematics close the automap (reported 2026-10-03: "when changing acts it seems the map gets closed even if it's set
+to stay open"; the game log of that day has Andariel killed at 14:21:27 and Lut Gholein at 14:22:04, so act02start
+played). Every panel the game opens goes through the panel gate (the record: panel gate), and the automap's row of its
+rules closes the automap only for panel 17, the cinematics', which the video helper opens as a progression video plays
+(the first arrival in Acts 2, 3 and 4 after the act's boss, Diablo's end with the expansion's intro, Baal's end) and
+closes at MovieComplete; nothing in the game opens the map again. A waypoint between acts plays none, and the map stays
+open (the trace of 2026-09-29: no PanelManager message of the AutoMap's from the LoadScreenPanel's opening to past its
+unloading). The other ways the game closes the map itself are the close-all routine's automap flag (leaving a game,
+the Esc key with nothing else open, and packet 0x62 with type 6, which only a debug command and a classic game's quest
+timer send). So: sites.cpp derives the gate's rules from the Automap key's toggle (its gate call, the gate's walk over
+the UI vars and its rules, 32 panels) and game.cpp reads the automap's row at bind ("game: key actions: ... the game
+closes the automap as panel 17 opens"). While one of those panels is open (game::automap_held_closed), the tracker
+records nothing ("remember: a cinematic of the game's closed the automap - it is opened again once the cinematic is
+over", when the map was remembered open); once it is closed (a look at "Cinematics" messages, else the look once a
+second), the three are put back as at a load (the same presses and checks), after a loading screen still up (an act
+change's; LoadScreenPanel OpenPanel to Close/UnloadPanel, 10 s at the most) and kept 1 s ("remember: the automap is
+open again after the game's cinematic (1 press)"); a dead or absent character is waited for without the load's 60 s
+limit. Without the gate's rules everything is recorded as before. No new hook and no new routine called: the rules are
+static data (base-relocated), and the presses are the load's.
 
 All areas terrorized (approved 2026-09-27; it replaced the zone lock, a DesecrateGetCurrentScheduledZone hook that
 answered with one chosen zone): the tick, under the switch, looks from a game's first second and then every 5 s. If
@@ -1517,6 +1648,10 @@ thread under Proton), the server's frames (the tick, 25 a second) and the plugin
   player is in (a few). Nothing when the automap is not drawn or both switches are off. The landmarks, the spawn spots
   and the exits are read in the map reveal's area pass, once per area and act visit (an exit area's border rooms: a
   few hundred reads of their collision maps).
+- Rooms filled ahead (the landmarks' rolled shrines): the tick looks at the server player's area when an area or game
+  event says so and once a second; while an area is being filled, every server frame: up to 8 rooms built, 2 ms at
+  the most, then the game's fill pass fills them in its own frame step; once all are filled, one walk of the area's
+  rooms' units. Each area once a game.
 - The tick was left as it is: 25 a second, a dozen stat reads, the refills and the mirrors that are what the
   switches do, a flag each for the tables, the presets and the terror look (every 5 s: nothing but a shard or the
   switch changes manual terror, and the look is the check that it holds).
@@ -1662,17 +1797,21 @@ pass changes nothing.
 ## Test checklist (Joshua runs it)
 
 1. Log: sites resolved (all exactly once), hooks installed (regen, ExecuteEvents, FinalizeDamage, death
-   penalties, GetManaCost, PLAYER_AddExperience, ITEMS_ShouldRemoveOnUse, item quantity update, inventory item
+   penalties, GetManaCost, PLAYER_AddExperience, hireling experience, ITEMS_ShouldRemoveOnUse, item quantity update, inventory item
    name, item creation, class item skill bonuses, superior kind test, magic / rare / crafted affixes, affix picker,
    automatic affix picker, curse skill step,
    Cursed monster modifier step, vendor payment, client's portal trip, portal use, portal town end, town portal
    cast, wake in town, client's NPC menu, item free, socket contents free, cube products, item notice, enemy test,
-   kept target, AI dispatcher, killself timer, automap's draw of one unit), "the item writer
+   kept target, AI dispatcher, killself timer, automap's draw of one unit, item requirement test), "the item writer
    sends every item's real level to the client", "thread service: UI work accepted", "character: N presets in ...".
    No line begins with "seeds:" any more.
 2. F7 panel; Esc menu shows it automatically; the Character section shows the class and points once in a game.
 3. God mode in a pack; infinite mana with a costly skill (orb must not move); speed 0/100/300;
-   exp: kill at 1x then 10x and compare the Status note; exit before death: potion, "armed", lethal hit ->
+   exp: kill at 1x then 10x and at 1000x and compare the Status note ("Experience: N x 1000.00 = M"); with a
+   mercenary along its gains are scaled too ("Experience: your mercenary's N x ...") and its level chases yours (a
+   big kill can put it a few levels ahead, where it stops gaining until you pass it: the game's own gate); the
+   console status reads "exp=x1000.0 (N gains scaled, M the mercenary's)";
+   exit before death: potion, "armed", lethal hit ->
    character screen, no death counted; settings persist across restarts. Movement speed across games, without
    closing the game in between: 100, Save and Exit, load a character: as fast at once ("movement speed: base
    velocitypercent 100 -> 200 (bonus 100% on the game's own 100; a game's character, which starts without it)");
@@ -1736,6 +1875,13 @@ pass changes nothing.
    a waypoint to another act with the map open: it stays open. With Item Name Display on Hold the panel says to set
    Toggle, and Show Items is not kept. With the options off, D2RCore's own behaviour is back (the map closes on the
    first game after a launch).
+   Cinematics (log: "sites: panel gate's rules 0x229E930", "game: key actions: ... the game closes the automap as panel
+   17 opens"): with the map open, kill Andariel and go east with Warriv (or Duriel and Meshif, Mephisto and the red
+   portal, Diablo, Baal): the cinematic closes the map ("remember: a cinematic of the game's closed the automap - it is
+   opened again once the cinematic is over"); watch it or skip it: once it and the loading screen are gone the map is
+   open ("remember: the automap is open again after the game's cinematic (1 press)"), and no "remember: the automap
+   now closed" line. Save and Exit, load: still open. With the map closed before, it stays closed and nothing is
+   pressed. With the automap option off the cinematic closes the map as in the game.
 12. No durability loss (log: "sites: ... item durability loss (a hit's wear) / Impale: weapon durability loss" once
    each, "hooks: item durability loss hooked at 0x441B10", "hooks: Impale's weapon wear hooked at 0x5590C0",
    "settings: ... durability=1"): note your weapon's and armor's durability, switch it on, then melee a pack for a
@@ -2162,7 +2308,13 @@ pass changes nothing.
    In the Stony Field the Cairn Stones show, in the Dark Wood the Inifuss tree, in the Forgotten Tower its tome, in the
    Arcane Sanctuary the portals and the waypoint, Act 5's waypoints too (objects there: "... (no waypoint of this
    kind of area is a floor tile)"). A dungeon (the Den of Evil, a cave, the Catacombs): its waypoint at once; its
-   random shrines and wells still appear as you come near (the game makes them then). With Reveal the map on as well:
+   random shrines and wells still appear as you come near (the game makes them then), and so do most shrines and wells
+   of Act 3's jungle, Kurast and Travincal and of Acts 4 and 5 (2026-10-02: "I just saw a shrine pop up after getting
+   close that wasn't already shown", then "the one that didn't show was indoor in durance of hate, and it was a health
+   shrine": the Durance's levels 100 .. 102 name group 61, five shrines at 20 each (MephistoShrine1 .. 3 magic, 4 mana,
+   5 (206) health: Objects Parm0 3 / 2 / 1) at ObjPrb 25 a room, and of its 58 room files (lvlprest's "Act 3 -
+   Mephisto ...", read from CASC) only MephNSE2.ds1 places a shrine itself, a MephistoShrine5: that one is the
+   layout's and shows at once). On Durance Level 3 the Hellgate's icon (342, cell 339) is on the map at once. With Reveal the map on as well:
    the whole area plus the shrines and the rest at once. Save and Exit, load: the icons are still there (saved with
    the map). The console: `cabbycodes landmarks on|off` and the status line "map: landmarks=1, this game N areas, N
    object icons and M waypoint tiles put on; ...". A switch greyed with a reason, or a warning that begins "sites: the
@@ -2209,3 +2361,47 @@ pass changes nothing.
    place, an opening named where nothing can be crossed, or one missing; a warning "exits: level N: R built rooms have
    no collision map where their place says" or "sites: a built room is not linked to the areas next to it ...". Should
    the game stop as you enter an area with the switch on, send d2rloader.log.
+40. Rolled shrines on the map (log: "sites: server: fill the rooms built since (each frame) 0x408670 hits=1", "sites: rooms
+   filled ahead the fill pass fills each room of an act's list whose state +0x54 lacks 0x1; a room's units from +0xA8,
+   the next +0x160", "landmarks: the shrines the game rolls are put on the map ahead (...)", in a game "map: bank 3: ...
+   (137 named: level 2 "Blood Moor"; 95 roll objects with an icon as their rooms are filled)"). Landmarks on the map
+   on (Reveal the map off makes it easiest to see). Walk into the Durance of Hate Level 1: within a second or two its
+   shrines are on the map, far from you ("landmarks: level 100: N rooms built ahead for the game to fill (M were built
+   already, 0 could not be), filled in T ms; K objects in the area, J with an icon handed to the map", then "landmarks:
+   level 100: J objects the game rolled as it filled the area's rooms on the map (J new)"). Walk to one: it is there,
+   and taking it works as always (a health shrine heals). The same in Level 2, Act 3's jungle and Kurast, Travincal,
+   Act 4's areas, Act 5's (its outdoor waypoints too), the dungeons of every act. Act 1's and Act 2's outdoor areas and
+   the towns: no such line (nothing they roll has an icon). The monsters are where the game put them; the fight goes as
+   always. No hitch on entering an area (`cabbycodes perf` while entering: "rooms built ahead" a few ms at the most in
+   a frame). The console's status line "map: landmarks=1, ..., N areas filled ahead (R rooms built for the game to
+   fill) and K of the objects it rolled put on". A warning "sites: the game's room fill pass is not made the way
+   expected" means the rolled shrines appear as the game shows them: send the log. Should the game stop as you enter
+   an area, send d2rloader.log.
+41. Ignore item requirements (log: "sites: item: can a unit use it (its requirements) 0x36BC50 / client: can the mercenary
+   wear an item 0x159D20 / pets: a player's pet of a type (its mercenary) 0x4FF1A0" hits=1 each, "sites: ignore item
+   requirements past level, strength and dexterity: item flag 0x10, a tome (type 18) its stat 70, the restricted
+   sockets 0x376110, ...; the items worked out again 0x470C90", "game: item requirements: the restricted-socket test
+   bound, a player's mercenary bound, the items worked out again bound", "ignore item requirements: bound (... your
+   gear worked out again at a switch: yes)", "ignore item requirements: your mercenary too (...)", "hooks: item
+   requirement test hooked at 0x36BC50", "settings: ... requirements=0/0"). Should the game stop at once after the
+   load with the log's last line the hook's, send d2rloader.log. A new character (level 1, no points spent) or a low
+   one carrying a high item of its class's (a rare weapon with Required Level 40 and Strength 100, an elite helm, a
+   runeword armor): its tooltip's requirement lines are red, its inventory cell red. F7, Cheats, tick "Ignore item
+   requirements": at once the lines are white and the cell is not red. Put it on: it goes on (no "I can't use this
+   yet"), and the character screen shows what it gives (damage, defense, its bonuses; an amulet's +skills on the skill
+   tree) ("ignore item requirements: item class N (item level L) is usable by your character, though its level,
+   strength requirements are not met", the first four). A charm whose level you do not have (a grand charm,
+   Annihilus, a Torch): its bonuses count. Another class's item (an orb for a Barbarian, a claw for a Sorceress) and an
+   unidentified item: refused, as in the game. Untick it with the item on: it stays on, its cell turns red and its
+   bonuses leave the character screen at once ("ignore item requirements: off for your character - what it wears and
+   carries worked out again"); tick it: back at once ("... on ..."). Save and Exit, load with it on: what is worn
+   counts from the start; load with it off: worn, red and giving nothing (the game's own). The mercenary: tick
+   "Ignore item requirements (mercenary)" with a low-level one and give it a weapon or armor it cannot use (level,
+   strength, dexterity): it takes it, and the mercenary's screen counts it. An Act 1 Rogue takes an Amazon bow, an Act
+   5 Barbarian a Barbarian helm, as in the game; an Act 2 mercenary still refuses a class item. Untick: its gear stays,
+   what it cannot use gives nothing ("ignore item requirements: on/off for your mercenary (monster class N) - what it
+   wears worked out again"; without one: "... none is with you now ..."). The console: `cabbycodes requirements
+   on|off`, `mercrequirements on|off`, and the status line "item requirements: requirements=1 mercrequirements=0; a
+   no turned into a yes N times for you and M for your mercenary, the gear worked out again K times". A switch greyed
+   with a reason, or a warning that begins "sites: the requirement test is not made the way expected" or "sites:
+   ... your mercenary's item requirements cannot be ignored", is a routine read wrong: send the log.

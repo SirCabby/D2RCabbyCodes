@@ -181,6 +181,18 @@ bool is_mercenary(Unit* u);
 // is in none (one an item's Reanimate As raised) answers 0, as does anything that is no player's pet. Reads only.
 bool has_pet_lookup();
 int pet_type(Unit* player, uint32_t unit_id);
+// Item requirements. The restricted-socket test the game's requirement test asks past level, strength and dexterity
+// (3.3's Colossal Jewels: another item the unit wears shares a restricted socket type with this one, at the body
+// location asked; any thread, as the test is), called as the test calls it; the server's lookup of a player's live
+// pet of a type (its mercenary: the one its handlers of the mercenary's gear ask); and what a player's or its
+// mercenary's items give worked out again (server thread): the cube's refresh, which asks the requirement test of each
+// worn item and charm.
+bool has_restricted_test();
+bool restricted_socket(Unit* unit, Unit* item, int body_location);
+bool has_pet_of_type();
+Unit* pet_of_type(void* game, Unit* player, int type);
+bool has_items_refresh();
+void refresh_unit_items(void* game, Unit* unit);
 
 // The unit's own skills (not those an item grants) of its class, with the points spent in each:
 // the skill list at +0x100, one node per skill (+0x00 its Skills row: u16 id, charclass at +0x2C;
@@ -220,6 +232,13 @@ bool state_on(Unit* u, int state);
 // by field, as the game's room getter and its level getter read them (a path's room, room +0x18 the DRLG room,
 // +0x90 its level, +0x1F8 the id).
 int unit_level_id(Unit* u);
+// ... the level itself (the client's or the server's, as the unit is), its id and its DRLG; a DRLG room's ActiveRoom
+// once it is built (null before); the data-table bank a game record says (+0x106, the byte the DRLG routines take).
+void* unit_level(Unit* u);
+int level_id_of(void* level);
+void* level_drlg(void* level);
+void* room_built(void* room);
+uint8_t game_bank(void* game);
 
 // Town portals across acts (server thread, inside the portal hooks). The game record keeps an act it has made at
 // its acts ({acts, count}; an act is made when a player first enters it, by the routine the act change calls).
@@ -286,6 +305,9 @@ int level_layer(uint8_t bank, int level_id);  // the layer the game keeps a leve
 int level_type(uint8_t bank, int level_id);   // the level's type, what the automap's tile lookup is asked for (-1)
 void* level_first_room(void* level);
 void* room_next(void* room);
+// CreateActiveRoom found: a DRLG room can be built (the client's for the map reveal, the server's for the rooms an area
+// is filled with ahead: the same routine on either side's DRLG, on the thread that owns it).
+bool has_room_build();
 // The room built for play if it is not (the game's CreateActiveRoom), then all of it put on the automap
 // by the client DRLG's own automap callback. False when the room could not be built.
 bool reveal_room(uint8_t bank, void* room);
@@ -331,5 +353,10 @@ bool key_action_wrapped(KeyAction a);  // the entry runs D2RCore's wrapper of th
 bool press_key_action(KeyAction a);    // one press; false when the entry no longer holds what was checked
 int key_action_state(KeyAction a);     // 1 on (the automap open), 0 off, -1 unknown
 int item_name_display(KeyAction a);    // a Show Items key's display mode (ItemNameDisplay); -1 for the automap
+// The panels the game closes the automap for as they open: the panel gate's rule for the automap (in 3.3 only the
+// cinematics' panel, which plays as a character first reaches an act after its boss, and after Diablo and Baal).
+// While one is open the gate also refuses the automap.
+int automap_held_closed();   // 1 while one of them is open, 0 none, -1 not known
+uint32_t automap_closers();  // their panel ids, a bit each (0 when not known)
 
 }  // namespace d2rcc::game

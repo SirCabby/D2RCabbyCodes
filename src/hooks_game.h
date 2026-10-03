@@ -14,6 +14,7 @@
 //                                 a value; a thunk hands on the unit the writer keeps in rdi)
 //   death penalties               reached only if the above failed: leave the game
 //   PLAYER_AddExperience          the multiplier scales every gain
+//   hireling experience award     ... and the mercenary's, so it levels with the character
 //   CLIENT_GetLevelName           the area level after an area's name (while the two UI routines below run)
 //   AutomapPanel_Update / WaypointPanel_Populate  mark the names they ask for
 //   SKILLMANA_GetManaCost         infinite mana: the local player's skills cost nothing
@@ -61,6 +62,10 @@
 //   kept target                   ... nor is there a target kept on the monster (the Warlock demons' own, one a
 //                                 summoning skill set)
 //   killself timer                permanent revives: a revive's end is not run (revive.cpp)
+//   item requirement test         ignore item requirements (any thread: the client's, the server's, D2RCore's): for
+//                                 the local player, or its mercenary, level, strength and dexterity count as met; the
+//                                 tick has the game work the unit's items out again when a switch changes
+//                                 (requirements.cpp)
 //   automap's draw of one unit    named enemies on the map (the thread that draws the automap): after the game's own
 //                                 marker and name, a named enemy's red cross and name, and at the local player's own
 //                                 call the spawn spots of the super uniques and bosses (mapmarks.cpp)

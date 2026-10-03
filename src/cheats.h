@@ -53,6 +53,8 @@ enum Kind : int {
   kInfiniteSockets,     // ... Larzuk adds sockets
   kInfinitePersonalize, // ... Anya personalizes
   kInfiniteCubeIngredients,  // a Horadric Cube recipe uses nothing up: its ingredients come back to the inventory
+  kIgnoreRequirements,  // your character uses any item its class can: an item's level, strength, dexterity not asked
+  kIgnoreRequirementsMerc,  // ... and your mercenary any item it can
   kRevealMap,           // the whole map of the area you are in, and of each one you enter, on the automap
   kMapEnemies,          // named enemies on the automap (a red cross and the name), and their spawn spots
   kMapLandmarks,        // the landmarks the automap shows once you are near (waypoints, shrines...), at once
@@ -112,7 +114,8 @@ struct Status {
   unsigned ticks = 0;          // stat-regeneration ticks seen for the player
   unsigned hits_absorbed = 0;  // god mode: hits on you taken away
   unsigned lethal_hits = 0;    // exit before death: hits held at 1 life
-  unsigned exp_awards = 0;     // experience gains scaled
+  unsigned exp_awards = 0;      // experience gains scaled
+  unsigned exp_awards_merc = 0;  // ... of them the mercenary's own
   unsigned hits_scaled = 0;    // damage multiplier: hits by you or your minions scaled
   unsigned pet_hits = 0;       // invincible mercenary / minions: hits taken away
   unsigned effects_blocked = 0;  // cannot be frozen / poisoned: hits that would have

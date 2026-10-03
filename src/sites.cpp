@@ -51,6 +51,11 @@ const Spec kSpecs[kCount] = {
     {kPlayerAddExperience, "PLAYER_AddExperience",
      "48 85 D2 0F 84 90 01 00 00 55 57 41 56 41 57 48 83 EC 68 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 58 4C 8B F1 41 8B "
      "F9", 0, 0x44F2E0},
+    // The mercenary's own gain, the kill-exp region's three calls: (game, player, hireling, the hireling's
+    // level, amount on the stack). It doubles the amount into the 32-bit experience total.
+    {kHirelingAddExperience, "hireling experience award",
+     "40 53 57 41 54 41 55 41 57 48 81 EC 90 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 68 8B 9C 24 E0 00 00 00 "
+     "45 8B F9 48 89 4C 24 38 4D 8B E0 4C 8B EA 48 8B F9 85 DB", 0, 0x44F480},
     {kGetManaCost, "D2Common_SKILLMANA_GetManaCost",
      "48 89 5C 24 08 57 48 83 EC 20 41 8B F8 33 DB E8 ?? ?? ?? ?? 48 8B D0 48 85 C0 74 41 0F BF 88 2A 02 00 00", 0,
      0x33AA00},
@@ -561,6 +566,31 @@ const Spec kSpecs[kCount] = {
      "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 40 83 7C 24 78 0B 41 8B F0 4C 8B 44 "
      "24 70 41 8B F9 41 B9 6C 00 00 00 B8 72 00 00 00 44 0F 44 C8",
      0, 0x3F4670},
+    {kRoomFillPass, "server: fill the rooms built since (each frame)",
+     "40 55 57 41 55 48 8B EC 48 83 EC 70 48 8B F9 48 85 C9 75 ?? 88 4D 20 48 8D 4D 20 E8 ?? ?? ?? ?? 84 C0 74 01 CC "
+     "0F B6 8F 06 01 00 00 45 33 ED E8 ?? ?? ?? ?? 44 39 A8 08 01 00 00",
+     0, 0x408670},
+    // The requirement test: its fourth argument (r9) and third (r8d) kept on the stack, the unit in rbp, the item in rdi;
+    // the three flags it hands back (r9 and its fifth and sixth arguments) set to 0 first. The rest is read below.
+    {kItemRequirements, "item: can a unit use it (its requirements)",
+     "4C 89 4C 24 20 44 89 44 24 18 55 56 57 48 83 EC 60 33 F6 48 8B EA 48 8B F9 4D 85 C9 74 03 41 89 31 48 8B 84 24 "
+     "A0 00 00 00 48 85 C0 74 02 89 30 48 8B 84 24 A8 00 00 00 48 85 C0 74 02 89 30",
+     0, 0x36BC50},
+    // The client's check of what its mercenary can wear: the local player (CLIENT_GetLocalPlayer), its pet of the
+    // mercenary's type (`lea edx, [r8+imm8]`) in the client's pet list, the client's unit of that id (a monster: `mov edx,
+    // 1`), then the requirement test of the item on it.
+    {kClientMercUsable, "client: can the mercenary wear an item",
+     "40 53 48 83 EC 40 48 8B D9 84 D2 75 14 B9 1E 00 00 00 E8 ?? ?? ?? ?? 84 C0 75 06 48 83 C4 40 5B C3 48 89 7C 24 50 "
+     "E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 45 33 C0 48 8B C8 41 8D 50 ?? E8 ?? ?? ?? ?? BA 01 00 00 00 8B C8 E8 ?? ?? ?? "
+     "?? 48 8B F8 48 85 C0 74 ?? 48 85 DB 74 ?? 33 C0 45 33 C9 89 44 24 30 45 33 C0 48 89 44 24 28 48 8B D7 48 8B CB 48 "
+     "89 44 24 20 E8",
+     0, 0x159D20},
+    // The server's pet of a type: the game in r14, the pet type in rdi (r8d), whether a gone one counts in ebx (r9d); the
+    // player's data, then the pet types' count (the game's bank's tables, +0x12E0).
+    {kPetOfType, "pets: a player's pet of a type (its mercenary)",
+     "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 30 4C 8B F1 49 63 F8 48 8B CA 41 8B D9 "
+     "E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 41 0F B6 8E 06 01 00 00 E8 ?? ?? ?? ?? 48 8B B0 E0 12 00 00",
+     0, 0x4FF1A0},
 };
 
 Result g_results[kCount];
@@ -583,6 +613,8 @@ bool g_protected_checked = false;
 bool g_enemy_checked = false;
 ReviveFacts g_revive;
 MapFacts g_map;
+FillFacts g_fill;
+RequirementFacts g_requirement;
 
 // The bytes of an instruction's RIP-relative operand, as an absolute address.
 uintptr_t rip_operand(uintptr_t insn, int disp_at, int len) {
@@ -657,6 +689,8 @@ bool protected_stat_checked() { return g_protected_checked; }
 bool enemy_test_checked() { return g_enemy_checked; }
 const ReviveFacts& revive_facts() { return g_revive; }
 const MapFacts& map_facts() { return g_map; }
+const FillFacts& fill_facts() { return g_fill; }
+const RequirementFacts& requirement_facts() { return g_requirement; }
 uintptr_t call_target(Id id) { return call_at(address(id)); }
 
 size_t entry_bytes(Id id, uint8_t* out, size_t capacity) {
@@ -886,6 +920,21 @@ void derive() {
     } else {
       log_warn("sites: the Automap key does not ask a UI var where expected");
     }
+    // Its toggle (the key's call with ecx = the panel) asks the panel gate in toggle mode (`mov r8b, 1; mov edx, 2;
+    // mov ecx, ebx`). The gate walks the 32 panels with the UI vars (`lea rdi, [rip+vars]` first) and a row of rules
+    // per panel that is open, one for each panel that opens (`lea rsi, [rip+rules]`, `cmp byte [rdi], 0` on the open
+    // one's UI var, `mov rcx, [rsi]; mov eax, [rcx + r14*4]` the rule for the new one, `cmp ebx, 20h`).
+    const uintptr_t toggle = g_automap_panel ? call_at(f + 0x23) : 0;
+    const uintptr_t ask = toggle ? find_in(toggle, 0x80, "41 B0 01 BA 02 00 00 00 8B CB E8") : 0;
+    const uintptr_t gate = ask ? call_at(ask + 10) : 0;
+    const uintptr_t vars = gate ? find_in(gate, 0x60, "48 8D 3D ?? ?? ?? ??") : 0;
+    const uintptr_t walk = gate ? find_in(gate, 0x600, "48 8D 35 ?? ?? ?? ?? 80 3F 00 74 ?? 48 8B 0E 42 8B 04 B1") : 0;
+    const uintptr_t next = walk ? find_in(walk, 0x80, "FF C3 48 FF C7 48 83 C6 08 83 FB 20 72") : 0;
+    if (vars && next && rip_operand(vars, 3, 7) == g_derived[dUiVars] && g_automap_panel < 0x20)
+      g_derived[dPanelRules] = rip_operand(walk, 3, 7);
+    else if (g_automap_panel)
+      log_warn("sites: the automap's toggle does not ask the panel gate the way expected - what the game closes the "
+               "automap for (its cinematics) is taken for the player's doing");
   }
   if (const uintptr_t at = address(kKeyActionSelect)) g_derived[dKeyActions] = rip_operand(at + 5, 3, 7);
   // All areas terrorized. A Worldstone Shard's use asks whether the game has terror zones, picks its act's manual
@@ -1796,6 +1845,54 @@ void derive() {
                !room_list ? "its preset units" : !near_reset || !link_near ? "the near rooms"
                : !id_at || !same_record ? "the warp links" : !warp_room || !warp_type_at ? "the warp tile's preset"
                                                                                         : "the collision map");
+    // Rooms filled ahead. The game's fill pass, once a server frame: for each act, its list of rooms (the head the
+    // act's +0x18), and for every room whose filled bit (+0x54 & 1) is clear the presets, the random monsters, the
+    // object groups and the terror step, then the bit set. A room built is put at the head of its act's list (the
+    // ActiveRoom maker 0x2EF340, D2RCore's AllocateActiveRoom's original: +0xB0 the next, the act's +0x84 set), so a
+    // room the landmarks build is filled by this pass. What is in a room afterwards: its first unit (+0xA8) and each
+    // unit's next (+0x160), the pick-up's own walk.
+    g_fill = FillFacts{};
+    const uintptr_t pass = address(kRoomFillPass);
+    const uintptr_t fill_steps = pass ? find_in(pass, 0x240,
+                                                "48 8B CB E8 ?? ?? ?? ?? 85 C0 75 ?? 48 8B D3 48 8B CF E8 ?? ?? ?? ?? "
+                                                "48 8B D3 48 8B CF E8 ?? ?? ?? ?? 48 8B D3 48 8B CF E8 ?? ?? ?? ?? 48 8B "
+                                                "D3 48 8B CF E8 ?? ?? ?? ?? BA 01 00 00 00 48 8B CB E8")
+                                      : 0;
+    const uintptr_t filled_test = fill_steps ? call_at(fill_steps + 3) : 0;
+    const uintptr_t mark_filled = fill_steps ? call_at(fill_steps + 64) : 0;
+    const uintptr_t test_at = filled_test ? find_in(filled_test, 0x30, "8B 43 ?? 83 E0 ??") : 0;
+    const uintptr_t mark_at = mark_filled ? find_in(mark_filled, 0x40, "8B 4B ?? 8B C1 83 E0 ?? 83 C9 ?? 85 FF 0F 44 C8 89 4B") : 0;
+    const uintptr_t head_at = pass ? find_in(pass, 0x240, "48 8B 0C C1 E8 ?? ?? ?? ?? 4C 8B E0 48 8B D8 48 85 C0 0F 84") : 0;
+    const uintptr_t head = head_at ? call_at(head_at + 4) : 0;
+    const uintptr_t pickup_walk = address(kItemPickup);
+    const uintptr_t first_at = pickup_walk ? find_in(pickup_walk, 0x120,
+                                                     "48 8B 0C C1 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 74 ?? 48 8B CB E8")
+                                           : 0;
+    const uintptr_t next_at = pickup_walk ? find_in(pickup_walk, 0x120, "48 8B CB E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 75") : 0;
+    const uintptr_t first_unit = first_at ? call_at(first_at + 4) : 0;
+    const uintptr_t next_unit = next_at ? call_at(next_at + 3) : 0;
+    const uintptr_t next_read = next_unit ? find_in(next_unit, 0x40, "48 8B 83 ?? ?? ?? ?? 48 83 C4 20 5B C3") : 0;
+    int32_t units_at = 0, next_off = 0;
+    const bool walk = first_unit && find_in(first_unit, 8, "48 8B 81 ?? ?? ?? ?? C3") == first_unit &&
+                      mem::read_safe(first_unit + 3, &units_at) && next_read && mem::read_safe(next_read + 3, &next_off) &&
+                      units_at > 0 && units_at < 0x400 && next_off > 0 && next_off < 0x400;
+    const int state_at = test_at ? byte_at(test_at + 2) : -1;
+    const int bit = test_at ? byte_at(test_at + 5) : 0;
+    const bool same_state = mark_at && byte_at(mark_at + 2) == state_at && byte_at(mark_at + 18) == state_at &&
+                            byte_at(mark_at + 10) == bit && byte_at(mark_at + 7) == (0xFF & ~bit);
+    if (fill_steps && head && find_in(head, 8, "48 8B 41 18 C3") == head && same_state && state_at > 0 && bit > 0 &&
+        walk) {
+      g_fill.room_state_at = state_at;
+      g_fill.filled_bit = static_cast<uint32_t>(bit);
+      g_fill.room_units_at = units_at;
+      g_fill.unit_next_at = next_off;
+      g_fill.known = true;
+    } else if (pass) {
+      log_warn("sites: the game's room fill pass is not made the way expected (%s) - the shrines a room rolls are "
+               "not put on the map ahead",
+               !fill_steps ? "its steps" : !same_state ? "the filled bit" : !head ? "the act's rooms"
+                                                                                 : "a room's units");
+    }
     // The automap's draw of one unit: the unit's pixels through the transform (`mov rcx, rdi`: the view), the view's
     // rectangle (+0x18 x, +0x1C y, +0x20 width, +0x24 height), the marker with the view's scale (+0x38), then the name
     // by its kind; the stash's (a string of the game's) and an NPC's (the client's unit name, in its color) go to the
@@ -1833,6 +1930,182 @@ void derive() {
                !to_map_at ? "the transform" : !marker_at ? "the marker" : !rect ? "the view's rectangle"
                : !name_draw ? "the name draw" : "an NPC's name");
   }
+  // Ignore item requirements. The requirement test asks level, strength and dexterity first, then, in three places of its
+  // tail read here, each refusal a jump to the one `xor eax, eax` its first test's refusal takes: the identified flag
+  // (r13d, the item's flags at +0x18 masked with it), a tome's quantity (the item's type, exactly that one: `cmp eax,
+  // imm8`; the stat `lea edx, [rax+imm8]` from it, through GetUnitStat), the restricted-socket test at the body location
+  // it was asked about (its seventh argument) or else at the item type's two (two bytes of the ItemTypes row; both must
+  // refuse), then the item type's class (a byte of the row) when it is below the bound (`cmp al, imm8`): for a monster
+  // (`cmp eax, 1` after the unit type) the hireling test and then the hireling's class, for a player the unit's class.
+  // The getters it calls name the tables: a bank's data tables (an array by the bank, 16 bytes apart), the Items rows
+  // (an item's type in its row), the ItemTypes rows, and the Hireling rows (by the monster's class and the version, 100
+  // in an expansion bank: the hireling test reads one field, the hireling's class another, asked only of a unit with
+  // the mercenary flag). The client's mercenary check names the client's pet list (the lookup it asks with the
+  // mercenary's pet type for the local player), and asks this test. The items worked out again: the cube's refresh
+  // jumps to the routine that does it, which asks the test through one of its calls.
+  g_requirement = RequirementFacts{};
+  {
+    RequirementFacts& f = g_requirement;
+    const uintptr_t req = address(kItemRequirements);
+    const uintptr_t ident = req ? find_in(req, 0x700, "44 8B 68 18 41 83 E5 ??") : 0;
+    const uintptr_t tail =
+        req ? find_in(req, 0x700,
+                      "85 DB 0F 84 ?? ?? ?? ?? 45 85 E4 0F 84 ?? ?? ?? ?? 85 C9 0F 84 ?? ?? ?? ?? 45 85 ED 0F 84 ?? ?? ?? "
+                      "?? 48 8B CF E8 ?? ?? ?? ?? 83 F8 ?? 75 ?? 45 33 C0 8D 50 ?? 48 8B CF E8 ?? ?? ?? ?? 85 C0 0F 8E "
+                      "?? ?? ?? ?? 44 8B 84 24 B0 00 00 00 45 85 C0 74 ?? 48 8B D7 48 8B CD E8")
+            : 0;
+    const uintptr_t locs =
+        req ? find_in(req, 0x700,
+                      "48 8B CF E8 ?? ?? ?? ?? 48 8B CF 8B D8 E8 ?? ?? ?? ?? 8B D3 0F B6 C8 E8 ?? ?? ?? ?? 48 8B C8 48 85 "
+                      "C0 74 ?? 0F B6 40 ?? 44 0F B6 71 ?? EB ?? 32 C0 45 32 F6 44 0F B6 C0 48 8B D7 48 8B CD E8 ?? ?? "
+                      "?? ?? 45 0F B6 C6 48 8B D7 48 8B CD 0F B6 D8 E8 ?? ?? ?? ?? 84 DB 74 ?? 84 C0 0F 85")
+            : 0;
+    const uintptr_t cls =
+        req ? find_in(req, 0x700,
+                      "E8 ?? ?? ?? ?? 48 8B CF 8B D8 E8 ?? ?? ?? ?? 8B D3 0F B6 C8 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 74 ?? "
+                      "48 8B CF E8 ?? ?? ?? ?? 0F B6 43 ?? 3C ?? 73 ?? 8B D8 83 F8 ?? 74 ?? 48 8B CD E8 ?? ?? ?? ?? 48 8B "
+                      "CD 83 F8 01 75 ?? E8 ?? ?? ?? ?? 85 C0 74 ?? 48 8B CD E8 ?? ?? ?? ?? 3B D8 40 0F 94 C6 8B C6 E9 ?? "
+                      "?? ?? ?? E8 ?? ?? ?? ?? 85 C0 0F 85 ?? ?? ?? ?? 41 B8 ?? ?? 00 00 48 8D 15 ?? ?? ?? ?? 48 8B CD E8 "
+                      "?? ?? ?? ?? 3B D8 0F 85 ?? ?? ?? ?? B8 01 00 00 00")
+            : 0;
+    const uintptr_t refused = tail ? near_jump_at(tail + 2) : 0;
+    const bool refusals = refused && locs && cls && find_in(refused, 2, "33 C0") == refused &&
+                          near_jump_at(tail + 0x0B) == refused && near_jump_at(tail + 0x13) == refused &&
+                          near_jump_at(tail + 0x1C) == refused && near_jump_at(tail + 0x3F) == refused &&
+                          near_jump_at(locs + 0x5B) == refused && near_jump_at(cls + 0x6D) == refused &&
+                          near_jump_at(cls + 0x8A) == refused;
+    const uintptr_t type_of = tail ? call_at(tail + 0x25) : 0;
+    const uintptr_t restricted = tail ? call_at(tail + 0x58) : 0;
+    const uintptr_t types_row = locs ? call_at(locs + 0x17) : 0;
+    const bool calls = refusals && type_of && restricted && types_row && address(kGetUnitStat) &&
+                       call_at(tail + 0x38) == address(kGetUnitStat) && call_at(locs + 3) == type_of &&
+                       call_at(cls) == type_of && call_at(locs + 0x3E) == restricted &&
+                       call_at(locs + 0x50) == restricted && call_at(cls + 0x14) == types_row;
+    // The item's type: its Items row (the data tables of the item's bank, the row by its class) and the row's type.
+    const uintptr_t type_call = type_of ? find_in(type_of, 0x80, "8B D3 0F B6 C8 E8 ?? ?? ?? ?? 48 8B 5C 24 38 48 85 C0 75") : 0;
+    const uintptr_t type_read = type_of ? find_in(type_of, 0xC0, "0F BF 80 ?? ?? 00 00") : 0;
+    const uintptr_t items_row = type_call ? call_at(type_call + 5) : 0;
+    const uintptr_t items_count = items_row ? find_in(items_row, 0x20, "8B FA E8 ?? ?? ?? ?? 3B B8 ?? ?? 00 00 72") : 0;
+    const uintptr_t items_rows = items_row ? find_in(items_row, 0x40, "48 8D 98 ?? ?? 00 00") : 0;
+    const uintptr_t items_size = items_row ? find_in(items_row, 0x80, "48 69 44 24 ?? ?? ?? 00 00 48 03 03") : 0;
+    const uintptr_t tables_of = items_count ? call_at(items_count + 2) : 0;
+    const uintptr_t tables_lea =
+        tables_of ? find_in(tables_of, 0x40, "48 8B 44 24 38 48 8D 0D ?? ?? ?? ?? 48 03 C0 48 8B 04 C1") : 0;
+    // The ItemTypes row: the same data tables, its count checked, then rows + index * size.
+    const uintptr_t types_count =
+        types_row ? find_in(types_row, 0x30, "48 63 F2 E8 ?? ?? ?? ?? 48 8B F8 48 8B DE 85 F6 78 ?? 48 3B 98 ?? ?? 00 00")
+                  : 0;
+    const uintptr_t types_rows = types_row ? find_in(types_row, 0xA0, "48 81 C7 ?? ?? 00 00 48 89 5C 24 ?? 48 3B 5F 08") : 0;
+    const uintptr_t types_size = types_row ? find_in(types_row, 0xA0, "48 69 44 24 ?? ?? ?? 00 00 48 03 07") : 0;
+    int32_t v = 0;
+    const auto d32 = [&v](uintptr_t at) { return at && mem::read_safe(at, &v) ? v : -1; };
+    if (calls && ident && type_read && items_count && items_rows && items_size && tables_lea && types_count &&
+        types_rows && types_size && call_at(types_count + 3) == tables_of) {
+      f.restricted = restricted;
+      f.identified = static_cast<uint32_t>(byte_at(ident + 7));
+      f.tome_type = byte_at(tail + 0x2C);
+      f.quantity_stat = f.tome_type + byte_at(tail + 0x34);
+      f.tables = rip_operand(tables_lea + 5, 3, 7);
+      f.items_at = d32(items_rows + 3);
+      f.item_row = d32(items_size + 5);
+      f.item_type_at = d32(type_read + 3);
+      f.types_at = d32(types_rows + 3);
+      f.type_row = d32(types_size + 5);
+      f.body1_at = byte_at(locs + 0x27);
+      f.body2_at = byte_at(locs + 0x2C);
+      f.class_at = byte_at(cls + 0x2C);
+      f.class_none = byte_at(cls + 0x2E);
+      // The counts right after the rows ({rows, u64 count}), and the bound tested twice the same.
+      f.known = f.tables && f.identified && f.tome_type > 0 && f.quantity_stat > f.tome_type && f.items_at > 0 &&
+                d32(items_count + 9) == f.items_at + 8 && f.item_row > 0 && f.item_type_at > 0 &&
+                f.item_type_at + 2 <= f.item_row && f.types_at > 0 && d32(types_count + 0x15) == f.types_at + 8 &&
+                f.type_row > f.class_at && f.body1_at > 0 && f.body2_at > 0 && f.class_none > 0 &&
+                byte_at(cls + 0x35) == f.class_none;
+    }
+    // The mercenary: the hireling test's and the hireling's class's reads of a Hireling row, the client's pet list, and
+    // the server's pet of a type.
+    const uintptr_t kind_of = cls ? call_at(cls + 0x48) : 0;
+    const uintptr_t class_of = cls ? call_at(cls + 0x54) : 0;
+    const uintptr_t kind_read =
+        kind_of ? find_in(kind_of, 0x80, "E8 ?? ?? ?? ?? 48 8B 7C 24 38 48 8B 5C 24 30 48 85 C0 74 ?? 8B 40 ??") : 0;
+    const uintptr_t class_read =
+        class_of ? find_in(class_of, 0x80,
+                           "83 39 01 75 ?? F7 81 ?? ?? 00 00 ?? ?? ?? ?? 74 ?? 0F B6 89 ?? ?? 00 00 33 D2 44 8B 40 04 80 "
+                           "F9 01 0F 95 C2 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 0F BE 80 ?? ?? 00 00 84 C0 79")
+                 : 0;
+    const uintptr_t hireling_row = class_read ? call_at(class_read + 0x24) : 0;
+    const uintptr_t hireling_walk =
+        hireling_row ? find_in(hireling_row, 0x60,
+                               "F7 DA 41 8B F8 66 1B DB 66 83 E3 ?? E8 ?? ?? ?? ?? 48 8B C8 48 8B 80 ?? ?? 00 00 48 69 91 "
+                               "?? ?? 00 00 ?? ?? 00 00 48 03 D0 48 3B C2 74 ?? 39 78 ?? 75 ?? 66 39 18 74")
+                     : 0;
+    const uintptr_t merc = address(kClientMercUsable);
+    const uintptr_t pets = merc ? call_at(merc + 0x3C) : 0;
+    const uintptr_t pets_walk =
+        pets ? find_in(pets, 0x80,
+                       "41 8B F8 8B F2 48 85 C9 74 ?? 48 8B 1D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 41 B8 ?? ?? 00 00 E8 ?? ?? "
+                       "?? ?? 48 85 DB 74 ?? 39 73 ?? 75 ?? 39 43 ?? 75 ?? 85 FF 75 ?? 39 7B ?? 74 ?? 48 8B 5B ?? 48 85 "
+                       "DB 75 ?? B8 FF FF FF FF 48 8B 5C 24 30 48 8B 74 24 38 48 83 C4 20 5F C3 8B 43 ??")
+             : 0;
+    if (f.known && kind_read && class_read && hireling_walk && call_at(kind_read) == hireling_row &&
+        call_at(hireling_walk + 0xC) == tables_of && d32(class_read + 7) == 0x124 && d32(class_read + 0x14) == 0x1BD &&
+        d32(hireling_walk + 0x1E) == d32(hireling_walk + 0x17) + 8 && merc && pets_walk &&
+        call_at(merc + 0x2D) == address(kClientGetLocalPlayer) && call_at(merc + 0x76) == req && address(kPetOfType)) {
+      RequirementFacts m = f;
+      m.hirelings_at = d32(hireling_walk + 0x17);
+      m.hireling_row = d32(hireling_walk + 0x22);
+      m.hireling_version = byte_at(hireling_walk + 0xB);
+      m.hireling_monster_at = byte_at(hireling_walk + 0x30);
+      m.hireling_kind_at = byte_at(kind_read + 0x16);
+      m.hireling_class_at = d32(class_read + 0x31);
+      m.mercenary_flag = static_cast<uint32_t>(d32(class_read + 0xB));
+      m.client_pets = rip_operand(pets_walk + 0xA, 3, 7);
+      m.pet_type_at = byte_at(pets_walk + 0x2A);
+      m.pet_owner_at = byte_at(pets_walk + 0x2F);
+      m.pet_gone_at = byte_at(pets_walk + 0x38);
+      m.pet_next_at = byte_at(pets_walk + 0x3E);
+      m.pet_id_at = byte_at(pets_walk + 0x5B);
+      m.mercenary_pet = byte_at(merc + 0x3B);
+      if (m.hirelings_at > 0 && m.hireling_row > m.hireling_class_at && m.hireling_version > 0 &&
+          m.hireling_monster_at > 0 && m.hireling_kind_at > 0 && m.hireling_class_at > 0 && m.mercenary_flag &&
+          m.client_pets && m.pet_next_at > 0 && m.pet_id_at > 0 && m.pet_type_at > 0 && m.pet_owner_at > 0 &&
+          m.pet_gone_at > 0 && m.mercenary_pet > 0)
+        f = m;
+    }
+    // The refresh: `mov r8d, r9d` and a jump to the routine that works a unit's items out; one of its calls (the test
+    // whether an item's stats count) asks the requirement test.
+    if (f.known && g_cube.refresh_items && find_in(g_cube.refresh_items, 4, "45 8B C1 E9") == g_cube.refresh_items) {
+      const uintptr_t works = jmp_at(g_cube.refresh_items + 3);
+      std::vector<uint8_t> code;
+      constexpr size_t kWorks = 0x500;  // its walk of the body's items, 0x118 bytes in (3.3)
+      if (works && mem::snapshot(works, kWorks, code) == kWorks) {
+        for (size_t i = 0; i + 5 <= code.size() && !f.refresh; ++i) {
+          if (code[i] != 0xE8) continue;
+          const uintptr_t callee = call_at(works + i);
+          std::vector<uint8_t> head;
+          if (!callee || mem::snapshot(callee, 0x48, head) != 0x48) continue;
+          for (size_t j = 0; j + 5 <= head.size(); ++j)
+            if (head[j] == 0xE8 && call_at(callee + j) == req) {
+              f.refresh = g_cube.refresh_items;
+              break;
+            }
+        }
+      }
+    }
+    if (req && !f.known)
+      log_warn("sites: the requirement test is not made the way expected (%s) - item requirements cannot be ignored",
+               !tail || !locs || !cls ? "its tests past level, strength and dexterity"
+               : !refusals            ? "where its tests refuse"
+               : !calls               ? "the routines its tests call"
+                                      : "the item tables");
+    else if (f.known && !f.client_pets)
+      log_warn("sites: %s - your mercenary's item requirements cannot be ignored",
+               !kind_read || !class_read || !hireling_walk ? "the hireling's class is not read the way expected"
+               : !merc || !pets_walk                       ? "the client's mercenary is not found the way expected"
+               : !address(kPetOfType)                      ? "the server's lookup of a player's mercenary is not found"
+                                                           : "the Hireling rows or the client's pet list are not laid "
+                                                             "out as expected");
+  }
   static const char* const kNames[dCount] = {"client unit table",       "server unit table",
                                              "server GetUnitByIdAndType", "client GetUnitByIdAndType",
                                              "players take no damage",  "monsters take no damage",
@@ -1844,6 +2117,7 @@ void derive() {
                                              "level record",            "Item Name Display setting",
                                              "Unfiltered Name Display setting", "setting value",
                                              "Show Items on/off bytes", "UI vars",
+                                             "panel gate's rules",
                                              "key-action table",        "terror zones on (game)",
                                              "terror zone apply",       "terror client update",
                                              "terror removal (kind)",   "affix picker",
@@ -1925,11 +2199,27 @@ void derive() {
        g_map.arcane_level, g_map.presets ? "" : "(not checked) ", g_map.draw ? "" : "(not derived) ",
        rva_of(g_map.to_map), rva_of(g_map.draw_marker), rva_of(g_map.draw_name), g_map.name_color,
        rva_of(g_map.unit_name));
+  logf("sites: %-28s %sthe fill pass fills each room of an act's list whose state +0x%X lacks 0x%X; a room's units "
+       "from +0x%X, the next +0x%X",
+       "rooms filled ahead", g_fill.known ? "" : "(not checked) ", g_fill.room_state_at, g_fill.filled_bit,
+       g_fill.room_units_at, g_fill.unit_next_at);
   logf("sites: %-28s %sa built room's own preset units at +0x%X; %sits near rooms at +0x%X, its warp links at +0x%X "
        "(a warp's id at +0x%X, its tile's preset unit of type %d), an ActiveRoom's collision map at +0x%X",
        "map: area names at exits", g_map.room_presets ? "" : "(not checked) ", g_map.room_presets_at,
        g_map.exits ? "" : "(not checked) ", g_map.near_at, g_map.links_at, g_map.warp_id_at, g_map.warp_preset_type,
        g_map.collision_at);
+  const RequirementFacts& r = g_requirement;
+  logf("sites: %-28s %spast level, strength and dexterity: item flag 0x%X, a tome (type %d) its stat %d, the restricted "
+       "sockets 0x%llX, an ItemTypes row's class +0x%X (none from %d); the data tables 0x%llX: Items +0x%X (%d bytes a "
+       "row, its type +0x%X), ItemTypes +0x%X (%d bytes, body locations +0x%X / +0x%X); %sthe mercenary: Hireling +0x%X "
+       "(%d bytes, version %d, monster +0x%X, kind +0x%X, class +0x%X; unit flag 0x%X), the client's pets 0x%llX (type "
+       "+0x%X, id +0x%X, owner +0x%X, gone +0x%X, next +0x%X; the mercenary's %d); %sthe items worked out again 0x%llX",
+       "ignore item requirements", r.known ? "" : "not derived ", r.identified, r.tome_type, r.quantity_stat,
+       rva_of(r.restricted), r.class_at, r.class_none, rva_of(r.tables), r.items_at, r.item_row, r.item_type_at,
+       r.types_at, r.type_row, r.body1_at, r.body2_at, r.client_pets ? "" : "(not derived) ", r.hirelings_at,
+       r.hireling_row, r.hireling_version, r.hireling_monster_at, r.hireling_kind_at, r.hireling_class_at,
+       r.mercenary_flag, rva_of(r.client_pets), r.pet_type_at, r.pet_id_at, r.pet_owner_at, r.pet_gone_at,
+       r.pet_next_at, r.mercenary_pet, r.refresh ? "" : "(not checked) ", rva_of(r.refresh));
 }
 
 size_t dump_image(uintptr_t exe_base, const wchar_t* path) {

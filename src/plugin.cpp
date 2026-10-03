@@ -37,10 +37,12 @@
 #include "loot.h"
 #include "mapmarks.h"
 #include "mapreveal.h"
+#include "roomfill.h"
 #include "remember.h"
 #include "hometown.h"
 #include "npcservice.h"
 #include "passive.h"
+#include "requirements.h"
 #include "revive.h"
 #include "version.h"
 #include "watchdog.h"
@@ -60,7 +62,8 @@ constexpr D2RL::PluginInfo kInfo{
                    "revives that stay until they die, no "
                    "freeze, poison or curses, infinite potions, scrolls, keys and gold, items identified as you "
                    "pick them up, imbues, sockets and "
-                   "personalizing without their quests, cube recipes that use nothing up, no durability loss, respec "
+                   "personalizing without their quests, cube recipes that use nothing up, gear without its level, "
+                   "strength and dexterity requirements, no durability loss, respec "
                    "and skill presets, map reveal, named enemies, landmarks and where each exit leads on the map, "
                    "health bars for monsters and act bosses, a home town of your choice, and the automap and Show "
                    "Items kept the way you left them between games.",
@@ -139,7 +142,8 @@ void log_settings() {
        g_settings.show_on_pause);
   logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d revives=%d unfreezable=%d "
        "unpoisonable=%d uncursable=%d tp=%d id=%d "
-       "autoid=%d potions=%d keys=%d gold=%d imbue=%d addsockets=%d personalize=%d cube=%d durability=%d home=%d "
+       "autoid=%d potions=%d keys=%d gold=%d imbue=%d addsockets=%d personalize=%d cube=%d requirements=%d/%d "
+       "durability=%d home=%d "
        "map=%d enemies=%d landmarks=%d exits=%d keep map=%d items=%d unfiltered=%d (remembered %d/%d/%d) log=%d/%s "
        "trace=%d",
        static_cast<double>(g_settings.damage_multiplier), g_settings.invincible_mercenary,
@@ -148,7 +152,8 @@ void log_settings() {
        g_settings.cannot_be_cursed, g_settings.infinite_town_portal, g_settings.infinite_identify,
        g_settings.auto_identify, g_settings.infinite_potions, g_settings.infinite_keys, g_settings.infinite_gold,
        g_settings.infinite_imbue, g_settings.infinite_sockets, g_settings.infinite_personalize,
-       g_settings.infinite_cube_ingredients, g_settings.no_durability_loss, g_settings.home_town, g_settings.reveal_map,
+       g_settings.infinite_cube_ingredients, g_settings.ignore_requirements, g_settings.ignore_requirements_mercenary,
+       g_settings.no_durability_loss, g_settings.home_town, g_settings.reveal_map,
        g_settings.map_named_enemies, g_settings.map_landmarks, g_settings.map_exit_names, g_settings.remember_automap,
        g_settings.remember_show_items, g_settings.remember_show_items_unfiltered, g_settings.automap_was_open,
        g_settings.show_items_was_on, g_settings.show_items_unfiltered_was_on, g_settings.logging,
@@ -395,6 +400,7 @@ DWORD WINAPI worker(void*) {
   healthbars::bind(g_threads != nullptr);
   mapreveal::bind(g_threads != nullptr);
   mapmarks::bind(g_threads != nullptr);
+  roomfill::bind();
   remember::bind(g_threads != nullptr);
   g_bound = true;
 #ifdef D2RCC_DEV
@@ -443,6 +449,9 @@ void __cdecl on_gameplay_event(const D2RL::PluginContext*, const D2RL::Lifecycle
   else if (e->kind == K::GameJoined || e->kind == K::LocalPlayerReady || e->kind == K::ActChanged ||
            e->kind == K::PlayerResurrected)
     mapreveal::arm(-1);
+  if (e->kind == K::LevelChanged || e->kind == K::GameJoined || e->kind == K::LocalPlayerReady ||
+      e->kind == K::ActChanged)
+    roomfill::arm();  // the server's tick fills the new area's rooms ahead
   if (e->kind == K::GameLeft) {
     game::clear_local_player();
     game::set_current_level(-1);
@@ -455,6 +464,7 @@ void __cdecl on_gameplay_event(const D2RL::PluginContext*, const D2RL::Lifecycle
     character::game_left();
     mapreveal::game_left();
     mapmarks::game_left();
+    roomfill::game_left();
     remember::game_left();
     terror::game_left();
     hometown::game_left();
@@ -557,6 +567,11 @@ D2RL::SharedEvents::UiMessageAction __cdecl on_ui_message(const D2RL::PluginCont
     remember::look();
     return D2RL::SharedEvents::UiMessageAction::Continue;
   }
+  if (target[0] == 'C' && same_str(target, "Cinematics")) {
+    // A cinematic of the game's is over (MovieComplete): the automap it closed is put back.
+    remember::look();
+    return D2RL::SharedEvents::UiMessageAction::Continue;
+  }
   if (target[0] != 'P' && target[0] != 'F') return D2RL::SharedEvents::UiMessageAction::Continue;
   // The pause menu is the panel named PauseLayoutGarden; PanelManager announces
   // its opening and closing, and the menu itself its own Close and Exit Game.
@@ -571,8 +586,9 @@ D2RL::SharedEvents::UiMessageAction __cdecl on_ui_message(const D2RL::PluginCont
       if (opened) loot::note_filter_panel(text, true);
       else if (closed) loot::note_filter_panel(text, false);
     } else if (same_str(text, "LoadScreenPanel")) {
-      // A game's loading screen going away: the automap and Show Items are no longer put back.
-      if (closed) remember::loading_screen_gone();
+      // A loading screen, a game's or an act's: the automap and Show Items are put back until it is gone.
+      if (opened) remember::loading_screen_shown();
+      else if (closed) remember::loading_screen_gone();
     }
     // A panel came or went: the automap's or Show Items' own, or the options' with their display modes.
     remember::look();
@@ -721,6 +737,8 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                                      {"imbue", cheats::kInfiniteImbue}, {"addsockets", cheats::kInfiniteSockets},
                                      {"personalize", cheats::kInfinitePersonalize},
                                      {"cube", cheats::kInfiniteCubeIngredients},
+                                     {"requirements", cheats::kIgnoreRequirements},
+                                     {"mercrequirements", cheats::kIgnoreRequirementsMerc},
                                      {"tp", cheats::kInfiniteTownPortal}, {"id", cheats::kInfiniteIdentify},
                                      {"autoid", cheats::kAutoIdentify},
                                      {"potions", cheats::kInfinitePotions}, {"keys", cheats::kInfiniteKeys},
@@ -860,7 +878,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
   std::snprintf(line, sizeof(line),
                 "CabbyCodes v%s: build %s (%s), scope %s, mod '%s', sites %ld/%d, hooks %s, player %s (#%u life %d/%d "
                 "mana %d/%d lvl %d exp %lld ticks %u). god=%d (%u hits on you, %u life losses refused) mana=%d exit=%d "
-                "exp=x%.1f speed=+%d%%",
+                "exp=x%.1f (%u gains scaled, %u the mercenary's) speed=+%d%%",
                 D2RCC_VERSION, ctx->buildVersion ? ctx->buildVersion : "?", ctx->buildName ? ctx->buildName : "?",
                 scope_name(ctx->loadScope), ctx->activeMod ? ctx->activeMod : "", static_cast<long>(g_sites_usable),
                 static_cast<int>(sites::kCount), g_bound ? "installed" : "pending", st.player_found ? "found" : "-",
@@ -868,7 +886,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                 st.ticks, cheats::enabled(cheats::kGodMode), st.hits_absorbed, hooks::life_losses_kept(),
                 cheats::enabled(cheats::kInfiniteMana),
                 cheats::enabled(cheats::kExitBeforeDeath), static_cast<double>(cheats::exp_multiplier()),
-                cheats::move_speed_bonus());
+                st.exp_awards, st.exp_awards_merc, cheats::move_speed_bonus());
   say(line);
   const loot::Stats loot_stats = loot::stats();
   std::snprintf(line, sizeof(line),
@@ -1004,6 +1022,19 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
     say(line);
   }
   {
+    // Ignore item requirements: the two switches, why each cannot work, and what they did this session.
+    const requirements::Stats qs = requirements::stats();
+    const char* why = cheats::why_not(cheats::kIgnoreRequirements);
+    const char* why_merc = cheats::why_not(cheats::kIgnoreRequirementsMerc);
+    std::snprintf(line, sizeof(line),
+                  "item requirements: requirements=%d%s%s mercrequirements=%d%s%s; a no turned into a yes %u times "
+                  "for you and %u for your mercenary, the gear worked out again %u times",
+                  cheats::enabled(cheats::kIgnoreRequirements), why ? " - " : "", why ? why : "",
+                  cheats::enabled(cheats::kIgnoreRequirementsMerc), why_merc ? " - " : "", why_merc ? why_merc : "",
+                  qs.player_yes, qs.mercenary_yes, qs.refreshes);
+    say(line);
+  }
+  {
     // Identify on pickup: the switch, why it cannot work, and what it identified this session.
     const autoid::Stats as = autoid::stats();
     const char* why = cheats::why_not(cheats::kAutoIdentify);
@@ -1026,17 +1057,22 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
   {
     // Landmarks, named enemies and exits on the map: the switches, why they cannot work, and what this game came to.
     const mapmarks::Stats ms = mapmarks::stats();
+    const roomfill::Stats rf = roomfill::stats();
     const char* lm_why = cheats::why_not(cheats::kMapLandmarks);
     const char* en_why = cheats::why_not(cheats::kMapEnemies);
     const char* ex_why = cheats::why_not(cheats::kMapExits);
     std::snprintf(line, sizeof(line),
-                  "map: landmarks=%d%s%s, this game %u areas, %u object icons and %u waypoint tiles put on; enemies=%d%s%s, "
-                  "%u spawn spots read, %u named enemies drawn (%u of them on the map now), %u marks let go as their "
-                  "monster died; exits=%d%s%s, %u areas, %u warps and %u openings named (%u on the map now)",
+                  "map: landmarks=%d%s%s, this game %u areas, %u object icons and %u waypoint tiles put on, %u areas "
+                  "filled ahead (%u rooms built for the game to fill) and %u of the objects it rolled put on; "
+                  "enemies=%d%s%s, %u spawn spots read, %u named enemies drawn (%u of them on the map now), %u marks "
+                  "let go as their monster died",
                   cheats::enabled(cheats::kMapLandmarks), lm_why ? " - " : "", lm_why ? lm_why : "", ms.areas, ms.icons,
-                  ms.waypoints, cheats::enabled(cheats::kMapEnemies), en_why ? " - " : "", en_why ? en_why : "",
-                  ms.spots, ms.drawn, ms.kept, ms.dead, cheats::enabled(cheats::kMapExits), ex_why ? " - " : "",
-                  ex_why ? ex_why : "", ms.exit_areas, ms.warps, ms.borders, ms.exits);
+                  ms.waypoints, rf.areas, rf.rooms, ms.rolled, cheats::enabled(cheats::kMapEnemies),
+                  en_why ? " - " : "", en_why ? en_why : "", ms.spots, ms.drawn, ms.kept, ms.dead);
+    say(line);
+    std::snprintf(line, sizeof(line), "map: exits=%d%s%s, %u areas, %u warps and %u openings named (%u on the map now)",
+                  cheats::enabled(cheats::kMapExits), ex_why ? " - " : "", ex_why ? ex_why : "", ms.exit_areas,
+                  ms.warps, ms.borders, ms.exits);
     say(line);
   }
   const terror::Stats terror_stats = terror::stats();
@@ -1070,7 +1106,8 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
       "unfreezable on|off | "
       "unpoisonable on|off | uncursable on|off | tp on|off | id on|off | autoid on|off | potions on|off | "
       "keys on|off | "
-      "gold on|off | imbue on|off | addsockets on|off | personalize on|off | cube on|off | durability on|off | "
+      "gold on|off | imbue on|off | addsockets on|off | personalize on|off | cube on|off | requirements on|off | "
+      "mercrequirements on|off | durability on|off | "
       "home 0..5 | "
       "map on|off | enemies on|off | landmarks on|off | ilvl on|off | keepmap on|off | keepitems on|off | "
       "keepunfiltered on|off | log on|off | "
@@ -1090,6 +1127,7 @@ void overlay::on_setting_changed() {
   apply_logging();
   InterlockedExchange(&g_save_pending, 1);
   mapreveal::arm(-1);
+  roomfill::arm();
   remember::look();
   watchdog::wake();
 }

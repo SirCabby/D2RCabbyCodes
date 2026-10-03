@@ -206,6 +206,7 @@ void arm(int level) {
 void on_ui(ULONGLONG now) {
   if (!g_bound) return;
   perf::Timer timer(perf::kMapReveal);
+  if (mapmarks::found_waiting()) mapmarks::put_found(now);  // what the game rolled in an area's rooms filled ahead
   if (g_reset && InterlockedExchange(&g_reset, 0)) {
     g_job = Job{};
     for (std::bitset<kMaxLevels>& d : g_done) d.reset();

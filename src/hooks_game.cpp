@@ -28,9 +28,11 @@
 #include "loot.h"
 #include "hometown.h"
 #include "mapmarks.h"
+#include "roomfill.h"
 #include "movespeed.h"
 #include "npcservice.h"
 #include "passive.h"
+#include "requirements.h"
 #include "revive.h"
 #include "watchdog.h"
 
@@ -51,6 +53,10 @@ using ManaCostFn = int32_t(__fastcall*)(uint32_t dataCtx, int32_t skillId, int32
 // PLAYER_AddExperience: (game, player, current level, amount). Caps at the level-99
 // total, sets the stat, and levels the character up when the total crosses a level.
 using AddExperienceFn = void(__fastcall*)(void* game, Unit* unit, int32_t level, int32_t amount) noexcept;
+// The hireling's award: (game, player, hireling, the hireling's level, amount; the fifth argument is on
+// the stack). It doubles the amount into the total and walks the level up the hireling record's curve.
+using HirelingExpFn = void(__fastcall*)(void* game, Unit* player, Unit* hireling, int32_t level,
+                                        int32_t amount) noexcept;
 // UI: the client's level-name getter and two routines that ask it for names.
 using LevelNameFn = const char*(__fastcall*)(uint32_t dataCtx, int32_t levelId) noexcept;
 using PassthroughFn = uint64_t(__fastcall*)(void* a, void* b, void* c, void* d) noexcept;
@@ -108,6 +114,7 @@ StatRegenFn g_orig_regen = nullptr;
 DeathHandlerFn g_orig_death = nullptr;
 ManaCostFn g_orig_mana_cost = nullptr;
 AddExperienceFn g_orig_add_exp = nullptr;
+HirelingExpFn g_orig_hireling_exp = nullptr;
 LevelNameFn g_orig_level_name = nullptr;
 PassthroughFn g_orig_automap_update = nullptr;
 PassthroughFn g_orig_automap_info = nullptr;
@@ -151,6 +158,8 @@ passive::EnemyTestFn g_orig_enemy_test = nullptr;
 passive::KeptTargetFn g_orig_kept_target = nullptr;
 // Permanent revives: the killself monster mod's timer (revive.h).
 revive::TimerFn g_orig_killself = nullptr;
+// Ignore item requirements: the game's requirement test (requirements.h).
+requirements::TestFn g_orig_requirements = nullptr;
 // Named enemies on the map: the automap's draw of one unit (mapmarks.h).
 AutomapUnitFn g_orig_automap_unit = nullptr;
 volatile LONG g_pay_seen = 0;          // the first payments not taken are logged
@@ -398,8 +407,10 @@ void tick(void* game, Unit* player) {
       (on(cheats::kMapLandmarks) || on(cheats::kMapEnemies) || on(cheats::kMapExits)) && !mapmarks::ready(bank) &&
       (st.ticks % 125) == 1)
     mapmarks::collect();  // the object icons, monsters' kinds and names, and the areas' names the map's marks read
+  roomfill::on_tick(game, player, st.ticks);  // an area entered: its rooms built ahead for the game to fill
   hometown::on_tick(game, player, st.ticks);  // the acts' towns, and the ones the character can reach
   npcservice::on_tick();  // an NPC's service switched on: no quest asks for it in the game's NPC table
+  requirements::on_tick(game, player);  // a switch changed: what you (or your mercenary) wear worked out again
   terror::on_tick(game, st.ticks);  // all areas terrorized: every act's zone applied as a shard applies it
   // The Chronicle, looked at every 5 s for the panel's counts while its loot switch is on (a drop reads it anyway).
   if (on(cheats::kChronicleOnly) && (st.ticks % 125) == 1) chronicle::read();
@@ -594,21 +605,55 @@ uint64_t call_target_rva(sites::Id site) {
   return sites::result(site).rva + 5 + static_cast<int64_t>(rel);
 }
 
+// The gain scaled by the multiplier, kept below what the receiver's 32-bit experience
+// total has room for: both writers add the gain to the total in 32 bits (the player's
+// with an unsigned cap at the level-99 figure, the hireling's with no cap of its own),
+// so a sum past 2^32 would wrap and lower the total. `weight` is what one point of the
+// gain adds to the total (1 for the player, 2 for the hireling, whose writer doubles
+// it), and `ceiling` the most one award may carry: the player's writer caps the total
+// itself, so INT32_MAX; the hireling's walks the level up with nothing but the 98 cap,
+// so one award keeps the game's own callers' ceiling (0x7FFFFF) and a burst stays small.
+int32_t scale_exp(int32_t amount, float m, uint32_t current, uint32_t weight, uint32_t ceiling) noexcept {
+  const double scaled = static_cast<double>(amount) * static_cast<double>(m) + 0.5;
+  uint32_t out = scaled >= 4294967295.0 ? 0xFFFFFFFFu : static_cast<uint32_t>(scaled);
+  const uint32_t room = (0xFFFFFFFFu - current) / weight;
+  if (out > room) out = room;
+  if (out > ceiling) out = ceiling;
+  return static_cast<int32_t>(out);
+}
+
 // Every experience gain of the local player passes through here (kills and
 // quest rewards alike); the multiplier scales the amount before the game adds
 // it, so the level-up check and the client's update see the scaled gain.
 void __fastcall hk_add_exp(void* game, Unit* unit, int32_t level, int32_t amount) noexcept {
   if (unit && amount > 0 && cheats::enabled(cheats::kExpMultiplier) && game::is_local_player(unit)) {
     const float m = cheats::exp_multiplier();
-    const double scaled = static_cast<double>(amount) * static_cast<double>(m) + 0.5;
-    // The game keeps experience as a 32-bit value and caps the total at the
-    // level-99 figure itself; the gain stays a positive int32.
-    const int32_t out = scaled >= 2147483647.0 ? 0x7FFFFFFF : static_cast<int32_t>(scaled);
+    const int32_t out =
+        scale_exp(amount, m, static_cast<uint32_t>(game::get_stat(unit, game::kExperience)), 1, 0x7FFFFFFFu);
     ++g_status.exp_awards;
     cheats::note("Experience: %d x %.2f = %d", amount, static_cast<double>(m), out);
     amount = out;
   }
   if (g_orig_add_exp) g_orig_add_exp(game, unit, level, amount);
+}
+
+// The mercenary's own gain (the kill-exp region's three calls, the amount the same
+// routine's as the player's): scaled under the same switch and multiplier, so it
+// levels with the character. The game's own rules still gate it (no gain at or above
+// the player's level or 98, or while it is dead); one scaled award can carry it a few
+// levels past the player, where it waits until the player passes it again.
+void __fastcall hk_hireling_exp(void* game, Unit* player, Unit* hireling, int32_t level,
+                                int32_t amount) noexcept {
+  if (player && hireling && amount > 0 && cheats::enabled(cheats::kExpMultiplier) &&
+      game::is_local_player(player)) {
+    const float m = cheats::exp_multiplier();
+    const int32_t out =
+        scale_exp(amount, m, static_cast<uint32_t>(game::get_stat(hireling, game::kExperience)), 2, 0x7FFFFFu);
+    ++g_status.exp_awards_merc;
+    cheats::note("Experience: your mercenary's %d x %.2f = %d", amount, static_cast<double>(m), out);
+    amount = out;
+  }
+  if (g_orig_hireling_exp) g_orig_hireling_exp(game, player, hireling, level, amount);
 }
 
 // The area level after the name: only while the automap or the waypoint panel
@@ -914,6 +959,14 @@ void __fastcall hk_killself_timer(void* game, Unit* monster, int32_t mod, int32_
   revive::timer(g_orig_killself, game, monster, mod, unique);
 }
 
+// The requirement test (any thread: the client's and the server's, and D2RCore's): for the local player, or its
+// mercenary, under its switch, level, strength and dexterity count as met (requirements.cpp); for anyone else, and
+// with both switches off, the game's own answer.
+int32_t __fastcall hk_item_requirements(Unit* item, Unit* unit, int32_t equipping, int32_t* strength,
+                                        int32_t* dexterity, int32_t* level, int32_t body_location) noexcept {
+  return requirements::test(g_orig_requirements, item, unit, equipping, strength, dexterity, level, body_location);
+}
+
 // A death's wake: the game's own first, which makes the player whole and wakes it in the town of the act it died
 // in; then, for the local player that was dead when the request came, the move on to the home town.
 uint64_t __fastcall hk_wake_in_town(void* game, Unit* player, void* packet, int32_t size) noexcept {
@@ -1168,6 +1221,9 @@ bool install() {
     }
   }
   const bool exp = install_one(sites::kPlayerAddExperience, &hk_add_exp, &g_orig_add_exp, "PLAYER_AddExperience");
+  const bool merc_exp =
+      install_one(sites::kHirelingAddExperience, &hk_hireling_exp, &g_orig_hireling_exp, "hireling experience");
+  if (exp && !merc_exp) logf("hooks: the experience multiplier leaves the mercenary's gains the game's own");
   const bool names = install_one(sites::kClientGetLevelName, &hk_level_name, &g_orig_level_name, "CLIENT_GetLevelName");
   const bool automap = names && install_one(sites::kAutomapInfoUpdate, &hk_automap_info, &g_orig_automap_info, "AutomapInfo_Update");
   if (names) install_one(sites::kAutomapUpdate, &hk_automap_update, &g_orig_automap_update, "AutomapPanel_Update");
@@ -1317,6 +1373,11 @@ bool install() {
   const char* revive_why = revive::bind();
   const bool killself =
       !revive_why && install_one(sites::kKillSelfTimer, &hk_killself_timer, &g_orig_killself, "killself timer");
+  // Ignore item requirements: the requirement test, which answers as the game does while both switches are off.
+  requirements::bind();
+  const bool requirement_test =
+      !requirements::why_not_player() &&
+      install_one(sites::kItemRequirements, &hk_item_requirements, &g_orig_requirements, "item requirement test");
   // Named enemies on the map: the automap's draw of one unit, after which a named enemy is drawn (mapmarks.cpp, which
   // sets the switch's why_not once it is bound).
   mapmarks::set_draw_hooked(game::has_map_draw() &&
@@ -1377,6 +1438,15 @@ bool install() {
                                                  : !killself             ? "revive timer not hooked"
                                                  : !revive::has_tables() ? "the game's skill table is unavailable"
                                                                          : nullptr);
+  cheats::set_why_not(cheats::kIgnoreRequirements, requirements::why_not_player() ? requirements::why_not_player()
+                                                   : !requirement_test            ? "requirement test not hooked"
+                                                                                  : nullptr);
+  cheats::set_why_not(cheats::kIgnoreRequirementsMerc,
+                      requirements::why_not_mercenary() ? requirements::why_not_mercenary()
+                      : !requirement_test               ? "requirement test not hooked"
+                                                        : nullptr);
+  if (requirement_test && !regen)
+    logf("hooks: ignore item requirements works out your gear again only at its next change (the tick not hooked)");
   cheats::set_why_not(cheats::kCannotBeFrozen, damage_why);
   cheats::set_why_not(cheats::kCannotBePoisoned, damage_why);
   if (execute && regen && !game::has_cure())
@@ -1483,6 +1553,7 @@ void uninstall() {
   g_orig_enemy_test = nullptr;
   g_orig_kept_target = nullptr;
   g_orig_killself = nullptr;
+  g_orig_requirements = nullptr;
   g_orig_automap_unit = nullptr;
   cube::hooked(false);
   hometown::wake_hooked(false);
@@ -1495,6 +1566,7 @@ void game_left() {
   g_monsters_collected = false;
   arealevel::reset();
   itemseed::game_left();
+  requirements::game_left();
 }
 
 unsigned life_losses_kept() { return static_cast<unsigned>(g_life_kept); }

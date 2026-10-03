@@ -139,6 +139,8 @@ std::string value_of(const Settings& s, const std::string& key) {
   if (key == "infinite_sockets") return s.infinite_sockets ? "true" : "false";
   if (key == "infinite_personalize") return s.infinite_personalize ? "true" : "false";
   if (key == "infinite_cube_ingredients") return s.infinite_cube_ingredients ? "true" : "false";
+  if (key == "ignore_requirements") return s.ignore_requirements ? "true" : "false";
+  if (key == "ignore_requirements_mercenary") return s.ignore_requirements_mercenary ? "true" : "false";
   if (key == "home_town") return std::to_string(s.home_town);
   if (key == "remember_automap") return s.remember_automap ? "true" : "false";
   if (key == "remember_show_items") return s.remember_show_items ? "true" : "false";
@@ -169,7 +171,8 @@ const char* const kOrder[] = {"enabled", "god_mode", "infinite_mana", "infinite_
                               "cannot_be_cursed",
                               "infinite_town_portal", "infinite_identify", "auto_identify", "infinite_potions",
                               "infinite_keys", "no_durability_loss", "infinite_gold", "infinite_imbue",
-                              "infinite_sockets", "infinite_personalize", "infinite_cube_ingredients", "home_town",
+                              "infinite_sockets", "infinite_personalize", "infinite_cube_ingredients",
+                              "ignore_requirements", "ignore_requirements_mercenary", "home_town",
                               "remember_automap", "remember_show_items", "remember_show_items_unfiltered",
                               "automap_was_open", "show_items_was_on", "show_items_unfiltered_was_on", "show_on_pause",
                               "toggle_key", "logging", "log_level", "trace"};
@@ -268,6 +271,8 @@ bool set_from(Settings* s, const std::string& key, const std::string& raw) {
   if (key == "infinite_sockets") return parse_bool(v, &s->infinite_sockets);
   if (key == "infinite_personalize") return parse_bool(v, &s->infinite_personalize);
   if (key == "infinite_cube_ingredients") return parse_bool(v, &s->infinite_cube_ingredients);
+  if (key == "ignore_requirements") return parse_bool(v, &s->ignore_requirements);
+  if (key == "ignore_requirements_mercenary") return parse_bool(v, &s->ignore_requirements_mercenary);
   if (key == "home_town") {
     char* end = nullptr;
     const long n = std::strtol(v.c_str(), &end, 10);
@@ -401,7 +406,7 @@ std::string rewrite(const std::string& toml, const Settings& s) {
 
 void clamp(Settings* s) {
   if (s->exp_multiplier < 1.0f) s->exp_multiplier = 1.0f;
-  if (s->exp_multiplier > 50.0f) s->exp_multiplier = 50.0f;
+  if (s->exp_multiplier > 1000.0f) s->exp_multiplier = 1000.0f;
   if (s->move_speed_bonus < 0) s->move_speed_bonus = 0;
   if (s->move_speed_bonus > 300) s->move_speed_bonus = 300;
   if (s->exit_below_life_percent < 0) s->exit_below_life_percent = 0;

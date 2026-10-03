@@ -23,9 +23,11 @@ struct Unit;
 // stairs, which the game shows only once the lever opened them, ahead too) put on the layer's units list with the key
 // the game gives an object it has seen, and each floor tile whose cell the game's lookup gives as the waypoint's put
 // on by the game's own per-tile add. Nothing the game does not put on its map is put on, and nothing is put anywhere
-// else: when the object or the tile is seen, the game's own reveal finds it there already. The shrines and
-// wells the server places at random when a room of a dungeon is first filled are in no layout: they keep the game's own
-// rule. What is put on is saved with the map, as what the game reveals itself is (and what Reveal the map puts on).
+// else: when the object or the tile is seen, the game's own reveal finds it there already. The shrines and wells the
+// server rolls when it first fills a room near a player (the object groups levels.txt names: most shrines of Act 3's
+// jungle, Kurast and Travincal, of Acts 4 and 5 and of the dungeons; Acts 1 and 2's outdoor areas roll none) are in
+// no layout: they keep the game's own rule. What is put on is saved with the map, as what the game reveals itself is
+// (and what Reveal the map puts on).
 //
 // Named enemies. The automap's pass over the units of the rooms near the player draws each through one routine
 // (hooked): the game's marker decision says which of its eight markers (colored crosses: blue the player, green the
@@ -177,6 +179,38 @@ constexpr bool waypoint_name(const char* name) {
 constexpr size_t kLevelNameKey = 0xFD;
 constexpr size_t kLevelNameKeyLen = 40;
 
+// The objects a level rolls as the server fills each of its rooms (the object group step 0x510F00): eight object
+// groups (Levels +0xED, ObjGrp, a byte each) with a chance each (+0xF5, ObjPrb, percent), and an ObjGroup row (0x30
+// bytes, the row the group's id; 0x38FD90): +0x00 eight object classes (int32, 0 none), +0x20 how many (DENSITY),
+// +0x28 the chance of each among them (PROB). A level can roll an object the automap has an icon for when one of its
+// groups with a chance names, with a chance of its own, a class whose Objects row has a cell: a shrine (310), a well
+// (309), a waypoint (307: Act 5's outdoor areas roll theirs).
+constexpr size_t kLevelObjGroups = 0xED, kLevelObjChances = 0xF5;
+constexpr int kObjGroupSlots = 8;
+constexpr uint32_t kObjGroupRow = 0x30;
+constexpr size_t kObjGroupClasses = 0x00, kObjGroupChances = 0x28;
+struct ObjGroup {
+  int32_t classes[kObjGroupSlots] = {};
+  uint8_t chances[kObjGroupSlots] = {};
+};
+inline bool rolls_icons(const uint8_t (&groups)[kObjGroupSlots], const uint8_t (&chances)[kObjGroupSlots],
+                        const ObjGroup* rows, int row_count, const int16_t* object_cell, int objects) {
+  for (int s = 0; s < kObjGroupSlots; ++s) {
+    if (!groups[s] || !chances[s] || groups[s] >= row_count) continue;
+    const ObjGroup& g = rows[groups[s]];
+    for (int k = 0; k < kObjGroupSlots; ++k) {
+      const int32_t cls = g.classes[k];
+      if (cls > 0 && cls < objects && g.chances[k] > 0 && object_cell[cls] > 0) return true;
+    }
+  }
+  return false;
+}
+// An object the server made in a room ahead (roomfill.cpp): its class and where it stands (its static path's pixels).
+struct PlacedObject {
+  uint32_t cls = 0;
+  int32_t px = 0, py = 0;
+};
+
 // A room's own preset units (sites::MapFacts room_presets_at: where CreateActiveRoom's build moves them, 0x3DE420, and
 // where the room preset add, 0x360BF0, puts every other): their places are the room's, in subtiles from its corner.
 constexpr int32_t kSubtiles = 5;  // a tile is 5 x 5 subtiles (0x334ED0)
@@ -264,6 +298,15 @@ bool landmarks_ready();  // the landmarks can be put on (bind found what they ne
 bool enemies_ready();    // ... the named enemies' spawn spots can be read (their drawing is the hook's)
 bool exits_ready();      // ... the exits found and their names drawn
 
+// The objects the game rolls as it fills a room (shrines, wells ...), put on ahead: whether a level rolls any with an
+// icon (any thread, once its bank is read), the objects the server made in its rooms handed over (the server thread:
+// how many have an icon), and put on the automap's layer of their level once it is the active one (the UI thread, when
+// found_waiting() says there are some; tried again a few times a second while the layer is another).
+bool level_rolls_icons(uint8_t bank, int level);
+int objects_found(uint8_t bank, int level, const PlacedObject* objects, size_t count);
+bool found_waiting();
+void put_found(uint64_t now_ms);
+
 // Game thread (the tick): the Objects, MonStats, SuperUniques and Levels rows the two read, and the names, per table
 // bank. Once a bank is read it is kept.
 void collect();
@@ -294,6 +337,7 @@ struct Stats {
   unsigned warps = 0;      // ... their warps named (cave entrances, stairs)
   unsigned borders = 0;    // ... their openings into the next area named
   unsigned exits = 0;      // exits on the map now
+  unsigned rolled = 0;     // objects the game rolled ahead put on the map (shrines, wells ...)
 };
 Stats stats();
 

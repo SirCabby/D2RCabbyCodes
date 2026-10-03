@@ -30,6 +30,9 @@ constexpr int kMaxDead = 1024;    // ... the layout's seen dead
 constexpr int kMaxDrawn = 512;    // named monsters counted as drawn in this game
 constexpr int kMaxPresets = 512;  // a room's preset units are walked no further
 constexpr int kMaxNamedLevels = 256;  // levels whose names are kept (3.3 has 137)
+constexpr int kMaxObjGroups = 512;    // ObjGroup rows (3.3 has 151)
+constexpr int kMaxFound = 4096;       // objects the game rolled ahead waiting for their layer
+constexpr uint64_t kFoundRetryMs = 250;
 constexpr int kMaxExits = 1024;   // exits on the map in this game
 constexpr int kMaxLinks = 64;     // a room's warp links are walked no further
 constexpr uint64_t kMaxNear = 256;  // ... nor its near rooms
@@ -103,6 +106,8 @@ struct Tables {
   int bosses;
   char level_name[kMaxNamedLevels][kNameLen];  // as the game names a level (its LevelName string)
   int level_names;                             // ... how many have one
+  bool level_rolls[kMaxLevels];                // the level's object groups can roll an object with an icon
+  int rolling_levels;                          // ... how many levels can
 };
 
 // A named enemy on the map: a spawn spot of an area's layout (a super unique, a boss), or a monster the automap has drawn,
@@ -134,6 +139,13 @@ struct Exit {
   bool warp;  // a warp's tile (a cave's entrance, stairs); else an opening into the next area
   char name[kNameLen];
 };
+// An object with an icon the game rolled ahead (roomfill.cpp), waiting for the automap to be on its level's layer.
+struct Found {
+  uint8_t bank;
+  int level;
+  uint16_t cell;
+  int32_t x, y;  // its key: the object's pixels / 10 plus (1, -3)
+};
 
 const D2RL::PluginContext* g_ctx = nullptr;
 const D2RL::DataTableService* g_tables = nullptr;
@@ -154,6 +166,9 @@ volatile LONG g_areas = 0, g_icons = 0, g_waypoints = 0, g_spot_stat = 0, g_draw
 volatile LONG g_full_warned = 0;
 Exit g_exits[kMaxExits];  // under g_cs
 int g_exit_count = 0;
+std::vector<Found> g_found;  // under g_cs
+volatile LONG g_found_waiting = 0, g_rolled_stat = 0, g_found_full_warned = 0;
+uint64_t g_found_tried = 0;  // the UI thread's
 volatile LONG g_exits_ok = 0, g_exit_areas = 0, g_warp_stat = 0, g_border_stat = 0;
 volatile LONG g_map_warned = 0, g_exits_full_warned = 0;
 // The draw thread only: the names written in the current draw.
@@ -265,6 +280,8 @@ bool read_bank(int b, Tables* t) {
   const std::vector<uint8_t> sup = rows_of(bank, TableId::SuperUniques, kSuperRow, kMaxSupers, &supers);
   const std::vector<uint8_t> obj = rows_of(bank, TableId::Objects, kObjectsRow, kMaxObjects, &objects);
   const std::vector<uint8_t> lev = rows_of(bank, TableId::Levels, kLevelsRow, kMaxLevels, &levels);
+  int obj_groups = 0;
+  const std::vector<uint8_t> grp = rows_of(bank, TableId::ObjGroup, kObjGroupRow, kMaxObjGroups, &obj_groups);
   if (!monsters || !supers || !objects || !levels) return false;
   t->monsters = monsters;
   t->supers = supers;
@@ -306,6 +323,23 @@ bool read_bank(int b, Tables* t) {
   }
   if (t->waypoint_cell <= 0) t->waypoint_cell = -1;
   for (int i = 0; i < levels; ++i) t->level_act[i] = field<uint8_t>(lev, kLevelsRow, i, kLevelAct);
+  // Which levels' object groups can roll an object with an icon (the rooms the landmarks have the game fill ahead).
+  std::vector<ObjGroup> groups(static_cast<size_t>(obj_groups));
+  for (int g = 0; g < obj_groups; ++g)
+    for (int k = 0; k < kObjGroupSlots; ++k) {
+      groups[static_cast<size_t>(g)].classes[k] =
+          field<int32_t>(grp, kObjGroupRow, g, kObjGroupClasses + static_cast<size_t>(k) * 4);
+      groups[static_cast<size_t>(g)].chances[k] =
+          field<uint8_t>(grp, kObjGroupRow, g, kObjGroupChances + static_cast<size_t>(k));
+    }
+  t->rolling_levels = 0;
+  for (int i = 0; i < levels; ++i) {
+    uint8_t lg[kObjGroupSlots] = {}, lc[kObjGroupSlots] = {};
+    std::memcpy(lg, lev.data() + static_cast<size_t>(i) * kLevelsRow + kLevelObjGroups, kObjGroupSlots);
+    std::memcpy(lc, lev.data() + static_cast<size_t>(i) * kLevelsRow + kLevelObjChances, kObjGroupSlots);
+    t->level_rolls[i] = obj_groups > 0 && rolls_icons(lg, lc, groups.data(), obj_groups, t->object_cell, objects);
+    t->rolling_levels += t->level_rolls[i] ? 1 : 0;
+  }
   // A level's name as the game shows it: its LevelName key's string (the key itself when the loader has none).
   t->level_names = 0;
   for (int i = 0; i < levels && i < kMaxNamedLevels; ++i) {
@@ -851,9 +885,9 @@ void collect() {
       at += static_cast<size_t>(std::snprintf(bosses + at, sizeof(bosses) - at, "%s%s", i ? ", " : "",
                                               t.boss[i].text[0] ? t.boss[i].text : "?"));
     logf("map: bank %d: %d object classes with an icon (the waypoints' %d), %d super uniques (the first \"%s\"), %d "
-         "bosses (%s), %d levels (%d named: level 2 \"%s\")",
+         "bosses (%s), %d levels (%d named: level 2 \"%s\"; %d roll objects with an icon as their rooms are filled)",
          b, t.icon_kinds, t.waypoint_cell, t.supers, t.super_name[0], t.bosses, bosses, t.levels, t.level_names,
-         level_name(t, 2));
+         level_name(t, 2), t.rolling_levels);
   }
 }
 
@@ -929,6 +963,72 @@ void unit_drawn(Unit* unit, const void* view) {
   }
 }
 
+bool level_rolls_icons(uint8_t bank, int level) {
+  const Tables* t = tables_of(bank);
+  return t && level > 0 && level < t->levels && t->level_rolls[level];
+}
+
+int objects_found(uint8_t bank, int level, const PlacedObject* objects, size_t count) {
+  const Tables* t = tables_of(bank);
+  if (!t || !g_cs_ready || level <= 0 || level >= t->levels) return 0;
+  const int act = t->level_act[level];
+  const ObjectRules r = rules();
+  int found = 0;
+  bool full = false;
+  EnterCriticalSection(&g_cs);
+  for (size_t i = 0; i < count; ++i) {
+    const uint32_t cls = objects[i].cls;
+    if (cls >= static_cast<uint32_t>(t->objects)) continue;
+    const int cell = t->object_cell[cls];
+    // As a layout's object: the mode the game's rules ask for is not looked at (the sewer stairs are put on closed).
+    if (!icon_shows(r, static_cast<int>(cls), cell, act, level, -1)) continue;
+    ++found;
+    if (g_found.size() >= static_cast<size_t>(kMaxFound)) {
+      full = true;
+      continue;
+    }
+    g_found.push_back(Found{bank, level, static_cast<uint16_t>(cell), cell_x(objects[i].px), cell_y(objects[i].py)});
+  }
+  if (!g_found.empty()) InterlockedExchange(&g_found_waiting, 1);
+  LeaveCriticalSection(&g_cs);
+  if (full && log_once(&g_found_full_warned, LogLevel::kWarning))
+    log_warn("landmarks: %d objects the game rolled wait for their area's map - no more are kept", kMaxFound);
+  return found;
+}
+
+bool found_waiting() { return g_found_waiting != 0; }
+
+void put_found(uint64_t now_ms) {
+  if (!g_found_waiting || !g_cs_ready || now_ms - g_found_tried < kFoundRetryMs) return;
+  g_found_tried = now_ms;
+  std::vector<Found> all;
+  EnterCriticalSection(&g_cs);
+  all.swap(g_found);
+  LeaveCriticalSection(&g_cs);
+  // Put on what is of the layer the automap shows now; the rest waits for its own.
+  const int active = game::automap_layer();
+  std::vector<Found> later;
+  int level = -1;
+  unsigned put = 0, added = 0;
+  for (const Found& f : all) {
+    if (active < 0 || !game::has_map_objects() || game::level_layer(f.bank, f.level) != active) {
+      later.push_back(f);
+      continue;
+    }
+    ++put;
+    level = f.level;
+    if (game::map_put_cell(f.cell, f.x, f.y)) ++added;
+  }
+  EnterCriticalSection(&g_cs);
+  g_found.insert(g_found.end(), later.begin(), later.end());
+  InterlockedExchange(&g_found_waiting, g_found.empty() ? 0 : 1);
+  LeaveCriticalSection(&g_cs);
+  if (!put) return;
+  InterlockedExchangeAdd(&g_rolled_stat, static_cast<LONG>(added));
+  logf("landmarks: level %d: %u objects the game rolled as it filled the area's rooms on the map (%u new)%s", level,
+       put, added, later.empty() ? "" : " - more wait for their own area's map");
+}
+
 void game_left() {
   if (g_cs_ready) {
     EnterCriticalSection(&g_cs);
@@ -936,10 +1036,12 @@ void game_left() {
     g_dead_count = 0;
     g_drawn_count = 0;
     g_exit_count = 0;
+    g_found.clear();
+    InterlockedExchange(&g_found_waiting, 0);
     LeaveCriticalSection(&g_cs);
   }
   for (volatile LONG* v : {&g_areas, &g_icons, &g_waypoints, &g_spot_stat, &g_drawn_stat, &g_dead_stat, &g_exit_areas,
-                           &g_warp_stat, &g_border_stat})
+                           &g_warp_stat, &g_border_stat, &g_rolled_stat})
     InterlockedExchange(v, 0);
 }
 
@@ -954,6 +1056,7 @@ Stats stats() {
   s.exit_areas = static_cast<unsigned>(g_exit_areas);
   s.warps = static_cast<unsigned>(g_warp_stat);
   s.borders = static_cast<unsigned>(g_border_stat);
+  s.rolled = static_cast<unsigned>(g_rolled_stat);
   if (g_cs_ready) {
     EnterCriticalSection(&g_cs);
     for (int i = 0; i < g_mark_count; ++i) s.kept += g_marks[i].unit ? 1u : 0u;
