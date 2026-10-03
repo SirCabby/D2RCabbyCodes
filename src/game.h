@@ -283,11 +283,37 @@ bool automap_saves_any_size();  // D2RCore's checked cell count is in the automa
 bool client_level(ClientLevel* out);  // the level the local player stands in, on the client's DRLG
 int automap_layer();                  // the automap's active layer, -1 before it has one
 int level_layer(uint8_t bank, int level_id);  // the layer the game keeps a level's map on, -1 unknown
+int level_type(uint8_t bank, int level_id);   // the level's type, what the automap's tile lookup is asked for (-1)
 void* level_first_room(void* level);
 void* room_next(void* room);
 // The room built for play if it is not (the game's CreateActiveRoom), then all of it put on the automap
 // by the client DRLG's own automap callback. False when the room could not be built.
 bool reveal_room(uint8_t bank, void* room);
+// ... the two halves: the room built (its ActiveRoom, null when it could not be), and a built room put on the automap.
+void* build_room(uint8_t bank, void* room);
+void reveal_built_room(void* active_room);
+
+// Landmarks and named enemies on the map (client, UI thread: where the game builds its rooms and its automap). The
+// automap keeps a layer per map (the active one is what it draws), each with lists of cells: the floor tiles', the
+// walls', the units' icons. A cell is put on one the way the game's own reveal puts one on: a floor tile by the game's
+// per-tile add (it marks the tile as on the map and asks the tile lookup which cell the tile is), an object's icon by
+// the list insert with the key the game gives an object it has seen ({0, cell, pixels / 10 + (1, -3)}). A list keeps a
+// key once. Only for the active layer, and only while it is the layer of the level the rooms are of.
+bool has_map_tiles();    // the per-tile add (sites::map_facts().tiles)
+bool has_map_objects();  // the list insert (sites::map_facts().objects)
+bool map_put_tile(uint8_t bank, void* tile, void* room);  // onto the active layer's floor list
+bool map_put_cell(uint16_t cell, int32_t x, int32_t y);   // onto its units' list
+// Drawing inside the automap's own draw of a unit, with its view (the routine's second argument): a point of the map
+// (pixels: a unit's path keeps its own, an object's are its subtiles' (x - y) * 16, (x + y) * 8) on the automap's
+// screen, false when it falls outside the automap; one of the automap's eight unit markers there, a name above it.
+bool has_map_draw();
+bool map_point(const void* view, int32_t px, int32_t py, uint64_t* point);
+float map_scale(const void* view);
+void map_marker(uint64_t point, int marker, float scale);
+void map_name(const char* text, uint64_t point, float scale, int color);
+int map_name_color();                     // the color the game draws an NPC's name in there
+const char* client_unit_name(Unit* u);    // the client's name of a unit: a unique monster's own name (UI thread)
+bool unit_pixels(Unit* u, int32_t* x, int32_t* y);  // where a unit is drawn (its path's pixels), any type
 
 // Three keys, on the client's side (UI thread, where the game runs its key bindings and opens its panels):
 // the Automap key (Tab) and the two Show Items keys. What they show is read where the game's own getters

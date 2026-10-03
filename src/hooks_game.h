@@ -60,6 +60,10 @@
 //                                 the test; any other question gets the game's answer)
 //   kept target                   ... nor is there a target kept on the monster (the Warlock demons' own, one a
 //                                 summoning skill set)
+//   killself timer                permanent revives: a revive's end is not run (revive.cpp)
+//   automap's draw of one unit    named enemies on the map (the thread that draws the automap): after the game's own
+//                                 marker and name, a named enemy's red cross and name, and at the local player's own
+//                                 call the spawn spots of the super uniques and bosses (mapmarks.cpp)
 // and two patches, not hooks: the item writer sends the client every item's real level, not only for rows
 // with ShowLevel (so the name has the right number), and the rare affix step's two picks call the affix picker
 // the other steps call (it called D2RCore's picker straight), so best affixes sees them.
@@ -67,7 +71,8 @@
 // poisoned ends a poison already on you with the antidote potion's own cure (under cannot be cursed a
 // curse, the same way), and under all areas terrorized applies every act's zone the way a Worldstone
 // Shard does (terror.cpp), and takes the quest out of the record of an NPC whose item service is switched on (one
-// byte of the game's NPC table, npcservice.cpp). The map reveal hooks nothing (mapreveal.cpp, on the UI thread).
+// byte of the game's NPC table, npcservice.cpp). The map reveal and the landmarks hook nothing (mapreveal.cpp,
+// mapmarks.cpp, on the UI thread).
 namespace d2rcc::hooks {
 
 bool install();    // after sites::derive() and game::bind(); sets each cheat's why_not

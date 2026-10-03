@@ -102,6 +102,9 @@ std::string value_of(const Settings& s, const std::string& key) {
   if (key == "area_level_automap") return s.area_level_automap ? "true" : "false";
   if (key == "area_level_waypoints") return s.area_level_waypoints ? "true" : "false";
   if (key == "reveal_map") return s.reveal_map ? "true" : "false";
+  if (key == "map_named_enemies") return s.map_named_enemies ? "true" : "false";
+  if (key == "map_landmarks") return s.map_landmarks ? "true" : "false";
+  if (key == "map_exit_names") return s.map_exit_names ? "true" : "false";
   if (key == "item_level") return s.item_level ? "true" : "false";
   if (key == "monster_health_bars") return s.monster_health_bars ? "true" : "false";
   if (key == "boss_health_bar") return s.boss_health_bar ? "true" : "false";
@@ -154,7 +157,8 @@ std::string value_of(const Settings& s, const std::string& key) {
 const char* const kOrder[] = {"enabled", "god_mode", "infinite_mana", "infinite_stamina", "exp_multiplier",
                               "move_speed_bonus", "exit_before_death", "exit_below_life_percent", "exit_method",
                               "terror_all_areas", "area_level_automap", "area_level_waypoints",
-                              "reveal_map", "item_level", "monster_health_bars", "boss_health_bar",
+                              "reveal_map", "map_named_enemies", "map_landmarks", "map_exit_names", "item_level",
+                              "monster_health_bars", "boss_health_bar",
                               "boss_bar_position", "loot_filter_only", "chronicle_only", "extra_drops",
                               "extra_drops_elites_only",
                               "perfect_rolls", "all_superior", "all_ethereal", "all_socketed", "max_affixes",
@@ -209,6 +213,9 @@ bool set_from(Settings* s, const std::string& key, const std::string& raw) {
   if (key == "area_level_automap") return parse_bool(v, &s->area_level_automap);
   if (key == "area_level_waypoints") return parse_bool(v, &s->area_level_waypoints);
   if (key == "reveal_map") return parse_bool(v, &s->reveal_map);
+  if (key == "map_named_enemies") return parse_bool(v, &s->map_named_enemies);
+  if (key == "map_landmarks") return parse_bool(v, &s->map_landmarks);
+  if (key == "map_exit_names") return parse_bool(v, &s->map_exit_names);
   if (key == "item_level") return parse_bool(v, &s->item_level);
   if (key == "monster_health_bars") return parse_bool(v, &s->monster_health_bars);
   if (key == "boss_health_bar") return parse_bool(v, &s->boss_health_bar);

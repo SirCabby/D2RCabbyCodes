@@ -213,6 +213,15 @@ enum Id : int {
                          // its owner's pet list and killed, any other monster put in its death mode (hooked)
   kPetTypeOf,            // (player, unit id) -> the pet type of the player's pet list the unit is in, 0 none: the first
                          // question of the pet removal the timer calls (called, read only)
+  // Named enemies on the map (client, the thread that draws the automap). The automap's pass over the units of the rooms
+  // near the player's draws each through one routine: the game's marker decision says which marker and which name,
+  // then the unit's place goes through the automap's transform and the marker and the name are drawn.
+  kAutomapUnitDraw,      // (unit, the automap's view): one unit's marker and name on the automap (hooked); its calls
+                         // name the transform, the marker and name draws and the client's unit name (derived below)
+  kCollisionFlags,       // (room, x, y, mask) -> u16: a subtile's collision flags in the room's map. Read only: where
+                         // a built room keeps its collision map, and the map's layout (area names at exits)
+  kWarpTilePreset,       // (bank, DRLG room, tile x, y, tile flags, orientation): a warp tile's preset unit, of type 5
+                         // and the warp's id for its class. Read only (area names at exits)
   kCount
 };
 
@@ -421,6 +430,52 @@ struct ReviveFacts {
   uintptr_t pet_removal = 0;  // (game, owner, unit id, kill): the pet out of its owner's pet list, killed
 };
 const ReviveFacts& revive_facts();
+// Named enemies and landmarks on the map, read from the code of the automap's routines (not known: nothing is taken for
+// granted). The automap callback's reveal of a whole room puts each of its floor tiles on with the per-tile add (the
+// tile lookup table says which cell a tile is), and in a tail jump each unit of the room whose icon shows with the unit
+// cell add; both put a cell on one of the active layer's lists with the list insert. CreateActiveRoom makes a DRLG room's
+// preset units; the automap's draw of one unit has the transform and the marker and name draws.
+struct MapFacts {
+  // Landmarks: the waypoint tiles and the preset objects' icons.
+  bool tiles = false;          // the per-tile add, the lookup table and the tile and record layouts are as read
+  bool objects = false;        // the list insert, the Objects row's icon and the reveal's three rules are as read
+  bool presets = false;        // a DRLG room's preset units are kept where CreateActiveRoom's preset step puts them
+  bool room_presets = false;   // ... and a built room's are moved into its own list (room-relative places)
+  int room_presets_at = 0;     // a DRLG room: its own preset units' list (+0x10 the next; x and y less its own subtiles)
+  uintptr_t tile_add = 0;      // (u8 bank, tile, DRLG room, list): a tile put on a layer's list, as its reveal does
+  uintptr_t list_insert = 0;   // (list, {node, bool} out, key): a cell put on one of a layer's lists (no twin)
+  int floor_list = 0;          // where a layer keeps its floor tiles' list
+  int object_list = 0;         // ... and its units' icons (objects, a few monsters)
+  uintptr_t lookup_records = 0;  // the tile lookup's records: {data, count}, 0x20 bytes a record
+  uintptr_t lookup_index = 0;  // ... and by level type the records it walks: {int32 first, int32 last}
+  int tile_type_at = 0;        // a tile's graphics record: its type (a floor, a wall ...), style and sequence
+  int tile_style_at = 0;
+  int tile_sequence_at = 0;
+  int level_type_at = 0;       // a level's record: its level type (what the lookup is asked for)
+  int object_cell_at = 0;      // an Objects row: the cell of its icon (0: none)
+  int stash_class = 0;         // the stash's object class: its icon only in two acts (from the first of them)
+  int stash_act = 0;
+  int stash_acts = 0;
+  int stairs_class = 0;        // the sewer stairs': only once open (that mode)
+  int stairs_mode = 0;
+  int arcane_class = 0;        // the Arcane Sanctuary's waypoint object: only in that level
+  int arcane_level = 0;
+  // Named enemies: the automap's draw of one unit.
+  bool draw = false;           // the routine's calls and the view's fields are as read
+  uintptr_t to_map = 0;        // (view, uint64 out, x | y << 32 pixels) -> out: the point on the automap's screen
+  uintptr_t draw_marker = 0;   // (x | y << 32, marker 0 .. 7, float scale): one of the automap's unit markers
+  uintptr_t draw_name = 0;     // (UTF-8 text, x | y << 32, float scale, color): a name above that point
+  uintptr_t unit_name = 0;     // (unit) -> UTF-8: the client's name of a unit (a unique monster's own name)
+  int name_color = 0;          // the color the game draws an NPC's name in on the automap
+  // Area names at exits: how a built room is linked to the rooms of the areas next to it.
+  bool exits = false;          // the near rooms, the warp links, the warp tiles' presets and the collision map as read
+  int near_at = 0;             // a DRLG room: its near rooms {DRLG room* array, u64 count} (other areas' among them)
+  int links_at = 0;            // ... its warp links: {+0 the DRLG room at the other end, +8 the next, +0x20 the warp}
+  int warp_id_at = 0;          // a warp's record (LvlWarp): its id, the class of its tile's preset unit
+  int warp_preset_type = 0;    // the preset unit type of a warp tile
+  int collision_at = 0;        // an ActiveRoom: its collision map {x, y, width, height (subtiles), ... +0x20 u16 flags}
+};
+const MapFacts& map_facts();
 uintptr_t call_target(Id site);  // where a call-site entry's `call rel32` goes (0 when unknown or not a call)
 uintptr_t exe_base();
 // The live bytes at a routine's entry (the signature's span), for the loader's expected-bytes checks.

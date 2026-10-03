@@ -91,7 +91,35 @@ loader is the injection point every runtime mod uses).
   revived minions don't time out and stay until death"; Joshua chose the timer dropped, and Revives only): one hook,
   on the server thread, the killself monster mod's timer (the end of a revive's time; a Decoy's and a Reanimate As
   monster's too), whose original is not run for a revive of the local player's under the switch; inside it one routine
-  of the game's called, the pet lookup the original's pet removal asks first (read only). Nothing written.
+  of the game's called, the pet lookup the original's pet removal asks first (read only). Nothing written. Approved
+  2026-10-02 for named enemies and landmarks on the map (asked as "add a new display option to show named enemies on
+  the map as well as shrines and other landmarks that usually require a close distance to appear on the map"; Joshua
+  chose the unit-draw hook with spawn spots, uniques, super uniques, bosses and Heralds, two switches, and for
+  landmarks "only the landmarks normally shown on the map that usually require distance to draw, such as waypoints",
+  then waypoints and object icons from the area's layout only, no look at the objects the client knows): named
+  enemies, one hook on the client, the automap's draw of one unit (the thread that draws the automap, the UI thread),
+  after whose original the game's own routines are called: the transform of a point to the automap's screen, the
+  marker draw, the name draw and the client's unit name (which rebuilds the name it caches in the monster's data, as
+  it does for the game's own NPC names); nothing written. Landmarks, no hook: on the UI thread, inside the map
+  reveal's area pass (whose rooms are built with CreateActiveRoom also when Reveal the map is off), the game's per-tile
+  add for the floor tiles the automap's tile table gives the waypoint's cell (it marks the tile as on the map), and the
+  automap object list's insert for a layout object's icon with the key the game gives a seen object: the game's own
+  routines, on the thread the game itself does both on, writing what its own reveal writes (saved with the map). The
+  same day, "the named on the map should also show regardless of distance like the landmarks cheat works": a named
+  monster the automap has drawn keeps its mark where it was last drawn, however far the player goes, until it is seen
+  dead (no new hook or call: the same draw hook and drawing calls). A random unique or a Herald cannot be shown before
+  the server makes it: a room's monsters are made as the room is first activated near a player (0x503790). Then
+  "looks like we're missing champions from the boss list": champions are marked too (their monster's name, in the
+  game's champion blue, text color 3, once for a pack's members close together in a draw). Asked the same day for
+  area names at exits ("let's add another display option to show area names for transition points, such as cave
+  entrances or area zone lines"; a third switch, `map_exit_names`): no new hook and no new routine called - the area
+  pass's room building (the rooms CreateActiveRoom builds link themselves to the areas next to them), reads of what it
+  makes (a room's near rooms, warp links, preset units, collision map), and the named enemies' draw hook with its
+  transform and name draw; nothing written. And, reported the same day ("a sparkle chest icon that didn't show up on
+  the map until I got close to it in the Flayer Dungeon Level 3", "the entrance to sewers level 2 also isn't showing
+  up on the map"): the landmarks read a built room's own preset list (they read the preset part's, which the build
+  empties of the room's units: Khalim's Brain chest and most other rooms' never came), and the sewer stairs of a
+  layout go on ahead (the game's rule shows them only once the lever opened them).
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -137,8 +165,9 @@ src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, 
                       portal's cast, town end and use, a death's wake, the client's portal trip, the client's NPC
                       menu, the cube's product routine, the item free and the socket contents' free, the protected-
                       stat test (god mode), the item notice (identify on pickup), the AI dispatcher, the enemy test
-                      and the kept target's getter (passive pets), the killself timer (permanent revives); the item
-                      writer patch, the rare step's picker calls
+                      and the kept target's getter (passive pets), the killself timer (permanent revives), the
+                      automap's draw of one unit (named enemies on the map); the item writer patch, the rare step's
+                      picker calls
 src/cheats.*          switches (atomics), Status snapshot, why-not reasons for the panel
 src/movespeed.h       movement speed: the bonus in the player's base velocitypercent, put on top of the game's own
                       again wherever the base is not what the tick wrote (each game's character starts at 100, with
@@ -202,8 +231,16 @@ src/revive.*          permanent revives: the killself monster mod's timer not ru
                       (tests/test_revive.cpp)
 src/itemlevel.*       item level after an item's name: Items and ItemTypes rows classified per bank (game thread),
                       the level added by the item-name hook (UI thread)
-src/mapreveal.*       map reveal: the current area's rooms built and revealed on the automap (UI thread, no hook;
-                      started by the loader's area and game events)
+src/mapreveal.*       the area pass: the current area's rooms built and, as the switches ask, revealed on the automap
+                      and handed to mapmarks (UI thread, no hook; started by the loader's area and game events)
+src/mapmarks.*        named enemies, landmarks and area names at exits on the map: the Objects, MonStats, SuperUniques
+                      and Levels rows and the levels' names (game thread, the tick), a room's layout read in the area
+                      pass (its own preset units: the objects' icons and the waypoint's floor tiles put on the automap
+                      by the game's own routines, the super uniques' and bosses' spawn spots noted, the warps' tiles;
+                      its warp links and its edges with other areas' rooms, walked over its collision map, for the
+                      exits), and the hook on the automap's draw of one unit (a named enemy's red cross and name, its
+                      mark kept where it was last drawn, the spawn spots, the exits' names of the player's area); the
+                      rules are in the header (tests/test_mapmarks.cpp)
 src/remember.*        the automap and the two Show Items keys kept between games: read while playing (when a key,
                       a button or a panel says so), put back at a load by pressing the keys through the key-action
                       table (UI thread, no hook)
@@ -506,6 +543,22 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | killself timer | 0x4A1D20 | (game, monster, mod, the monster's unique flag (0x38E870 (monster, 8))): a dead monster (0x34C2C0) nothing; one with state 0x36 (uninterruptable) the same event again at the game's frame + 3; else its owner (0x4A53C0): a player -> the pet removal 0x4FFD30 (game, owner, the monster's id, 1); no owner, or another kind -> the death mode (0x4471E0 (monster, 0, record), 0x4475C0 (game, record, 1)). Hooked: permanent revives |
 | killself's users | 0x55E7E0 / 0x556560 / 0x5710C0 / 0x584480 / 0x5A8750 | each adds mod 21 (0x4995E0) and its event (type 7, the mod its parameter) at the game's frame + a length. Revive (srvdofunc 58, 0x55E7E0): the corpse (0x48FE20) through 0x55A510, 0x55EDB0 and 0x55F8E0, its life (stats 7 and 6) and level, the owner (0x4A5800 (game, pet, owner id, owner type)), the unit to go to (0x5971B0), the AI's think event (type 2) 15 frames on, alignment 2 (0x48E600), the kept target cleared, unit flag 0x80000000 (0x34E190), state 0x60 revive (0x3354C0), then the skill's calc2 (Skills row +0x194, 0x3B5160: 4500 frames) above 0 -> killself and its event, then the pet registration 0x4FEB00 (game, owner, pet, the row's pet type +0x112 (a byte, below 0 none), the petmax calc +0x114). Decoy (srvdofunc 15, 0x556560: calc2 ln12, 250 frames and 125 more a level). The shadows (srvdofunc 49, 0x5710C0): only with a length (Skills row +0x80, auralencalc), none in 3.3. Reanimate As (ItemStatCost item_reanimate, itemevent kill, itemeventfunc 31 0x584320 in the item event table 0x238E5C0, which hands 0x584480 to 0x588550 as a callback): state 0x60, killself at frame + 1500, an owner but no pet registration, so in no pet list; Tomb Reaver and the Faith runeword in 3.3. 0x5A8750 (its callers 0x5A80C0 .. 0x5A85A0): monsters it spawns, killself at a random time. Read |
 | pet lists | 0x4FF3B0 / 0x4FFD30 / 0x5013F0 / 0x501550 / 0x500D80 / 0x501BC0 | a player's data (0x34B240, which asserts on anything else) +0x98: the pet lists, {entries, ...}; an entry 0x20 bytes a pet type (0x5013F0 (bank, lists, type): +0x00 the first node, +0x08 count, +0x0C max, +0x10 a group record; the number of types is the PetType rows', data tables +0x12E0); a node 0x20 bytes: +0x00 flags, +0x04 the unit's id, +0x18 the next. The lookup 0x4FF3B0 (player, id) -> the type whose list has the id, 0 none (types 1 up). The removal 0x4FFD30 (game, owner, id, kill): the lookup first (0 and kill: the unit killed by id, 0x500FB0), the node unlinked, the clients told (0x490D00), the unit killed (kill, 0x500FB0) or its flag 0x80000000 cleared. The registration 0x4FEB00 -> 0x501550 (game, owner, pet, type, max): the other types of its group out, the type's max set (0x501830), then 0x500D80: at the max the list is trimmed from its head (0x501BC0: 0x4FFD30 with kill), the new node appended at its tail, so the oldest gives way. PetType rows (pettype.txt order): 0 none, 1 single, 2 valkyrie, 3 golem, 4 skeleton, 5 skeletonmage, 6 revive, 7 hireable, 8 dopplezon ... 21 binddemon; a Skills row's +0x112 names its pets' (the loader's compiled rows, tests/test_revive.cpp). Called (the lookup): permanent revives |
+| automap: the units' pass | 0xD2600 | (draw args...): the automap panel's draw (its one caller 0x14E3480): the view made (0xD1940), a clip pushed (0x79D920; popped 0x79B6B0 at the end), the active layer's lists drawn (0xD6F10: floor +0x08, walls +0x30, units' icons +0x58, +0x80), then for each room of the player's room's near list (0x2EFDE0: ActiveRoom +0x00, count +0x40; the room itself is in it, as the unit name getter's skip of it shows) each unit of the room (ActiveRoom +0xA8, next 0x34B4A0) to the unit draw below, then the party members the client has no unit of (marker 1, names). Read |
+| automap: draw one unit | 0xD76E0 | (unit, view): the marker decision (0xD78F0), the party option (0x2A2CF98: markers 1 and 4 only with it on), the unit's pixels (0x34AF60 / 0x34AFB0: its path's +0x08 / +0x0C, any unit) through the transform 0xD4910 (view, out, x \| y << 32 pixels) -> out (x \| y << 32 on the screen: view +0x28 / +0x2C origin, +0x10 / +0x14 the centre and +0x30 / +0x34 the scale, the pixels / 10 plus (1, -3)), inside the view's rectangle (+0x18 x, +0x1C y, +0x20 width, +0x24 height), the marker 0xD6DB0 (point, marker 0..7, float scale = view +0x38), then with the names option (0x2A2CF9C, "AutoMap Party Names") the name by its kind: 0 / 1 / 2 a player's (0x34B240 through 0xD6AA0, colors 2 / 1), 3 the owner's, 4 the client's unit name (0x9A1B0) in color 4 through the name draw 0xD6B20 (UTF-8, point, scale, color: centred, the font's height above), 5 the string 0xCF3 (the stash). Hooked: named enemies on the map |
+| automap: the marker decision | 0xD78F0 | (unit, &marker, &name kind) -> whether drawn: a player: the local one 0, the party 1 (name 0), another 5 (name 1), a dead one in state 7 marker 2; a monster (not dead, not 0x34F8D0): an NPC row (MonStats flags byte +0x3D & 2: interact) marker 6 with its name (kind 4); a pet: 3 yours, 4 the party's, 5 another's with its owner's name; under the reveal-all byte (0x2A2ADD4) every other monster marker 5 (class 0x216 6), no name; objects: a town portal (59) marker 7, a permanent one (60) too but in levels 111, 112, 117, 125..127, the stash (267) only its name (5). The sprite "AUTOMAP/Units" (hd/global/ui/automap/units.sprite: 8 frames of 70 x 36, crosses): 0 blue, 1 green, 2 magenta, 3 slate, 4 dark green, 5 red, 6 white, 7 yellow. D2RCore lists it (and the reveal) among the routines it binds, and calls neither. Read |
+| automap: reveal a room | 0xD6550 | (u8 bank, ActiveRoom, force, layer owner): the floor tiles (0x2EFB70 (room, &count): ActiveRoom +0x08, its +0x20 tiles, +0x28 count; 0x48 bytes a tile, +0x18 flags) each not flag 8, and seen (0x20000), the reveal-all byte or force, to the per-tile add onto the owner's +0x08; the walls (0x2EFDF0) onto +0x30; then a tail jump to its unit pass 0xD6680 (bank, owner +0x58): each unit of the room drawn on the screen already (unit flag 0x10000000, 0x349C60; set by the world's unit draw 0x1CC3B0 when it drew the unit) and not on the map yet (0x20000000, 0x349C20; set by 0x34DFD0), or all under the reveal-all byte: a monster by its MonStats2 row's cell (+0x118: in 3.3 only barricadetower's, 1258), an object by its Objects row's (0x38FD00 (bank, class), +0x164: 148 classes in 3.3, shrines 310, wells 309, waypoints 307, quest objects ...) with three rules: the stash (267, cell 319) only where the act of the room's level (`.maho` 0x3E2B5C8) is 2 or 3, the sewer stairs (366) only in mode 2, the valley waypoint object (402) only in level 74; the unit cell add 0xD52B0 (unit, cell, list): the unit's pixels / 10 plus (1, -3) as the key {u16 0, u16 cell, int32 x, int32 y}, the list insert 0xD1460 (list, {node, bool} out, key): a red-black tree that keeps a key once (0xD4B70 finds the place), nodes 0x30 bytes from the game's allocator. Called (the insert): landmarks on the map |
+| automap: a tile's cell | 0xD5160 / 0x32BDF0 | the per-tile add (u8 bank, tile, DRLG room, list): a tile on the map already (flag 0x40000) is left, else the flag set, the level type (0x3269B0: the level record's +0x34), the tile's graphics record's type +0x14, style +0x18 and sequence +0x1C (0x1460210 / 0x1460190 / 0x1460150) to the lookup 0x32BDF0, and a cell other than -1 put on the list at the tile's place (room +0x60 / +0x64 plus the tile's +0x08 / +0x0C, tiles to pixels 0x334EF0, / 10, +0x18 to y when the tile's +0x28 is 0x10 or more), key tag 0, through the list insert. The lookup: records {data, count} at 0x2A9A8C8, 0x20 bytes (+0 level type, +4 tile type, +8 style (0xFF any), +9 / +0xA the first and last sequence (0xFF at +9 any), +0xC cells, +0x1C how many), by level type the range [first, last) at 0x2A9A8E0 (int32 pairs); the first that fits; with a count of 1 or more one cell picked by the automap's own stream (0x2372A40, stepped every time), else the first. automap.txt's "Waypoint" rows (Acts 1..4: 19, one cell, 307) are a waypoint's floor tiles; Act 5's waypoints and the Arcane Sanctuary's are objects with the icon 307. Called (the per-tile add, for a tile the table gives the waypoint's cell; the table read, not queried): landmarks on the map |
+| a room's preset units | 0x3DE0E0 / 0x3DF600 / 0x3DBB60 | CreateActiveRoom's preset step (u8 bank, DRLG room), for a preset room (+0x74 == 2) whose flag bit 25 is clear: the room's +0x40 -> +0x08 is its preset part; when its DS1 (+0x10) is not loaded (0x3DCF10) the units are made (0x3DF600 (bank, part, the room's seed +0x30)): each of the DS1's (+0x98, next +0x10; type +0x20, class +0x04) copied (0x3DBB60: 0x30 bytes, type +0x20, class +0x04, x +0x08 and y +0x24 the DS1's plus the room's subtiles (+0x18 / +0x1C x 5), a path +0x18) and linked at the part's +0x58 by +0x10; some object classes (0xC4, 0x105 a half, 0x245 a quarter) and the layout's random monster places (0x21..0x23 past the super uniques) kept by the room's seed; a monster's class is a MonStats row below the table's count, then a super unique's row (count + index; the SuperUniques count 0x3971E0: data tables +0x1080). Then bit 25 set. Level 2's preset rooms of types 4..7 get a monster unit of their own (0x360BF0). The outdoor shrines and waypoints are preset rooms (D2RCore's PlaceOutdoorShrines / PlaceOutdoorWaypoint place lvlprest records, 0x32C360); the shrines and wells of objgroup.txt (dungeons) are made by the server when it fills a room, in no layout. **These are the part's units, not yet the room's**: CreateActiveRoom's build step then moves the ones that stand in the room into the room's own list (next row), so after a build the part keeps only other rooms' units. Read: landmarks, named enemies (until 2026-10-02 the part's list was read after the build, and most rooms' units never came) |
+| a room's own preset units | 0x328FD0 / 0x3F38D0 / 0x3DE420 / 0x360BF0 | the build step (u8 bank, DRLG room), CreateActiveRoom's for a room whose flag bit 20 is clear: the near links (0x3608A0, when the room has no near rooms yet), the static grids 0x3F38D0 (a room of type 1 0x3F95E0; type 2 a tail jump to 0x3DE420, which after the grids moves every unit of the part's list (+0x58) that stands in the room (0x3605B0, the room's subtiles) into the room's own list (+0x98, by +0x10), x and y less the room's tile x and y (+0x60 / +0x64) times five), the map tiles 0x3F3930, the ActiveRoom (0x326480). The room preset add 0x360BF0 (bank, room, type, class, mode, x, y): a 0x30-byte unit {+0 mode, +4 class, +8 x, +0x10 next, +0x20 type, +0x24 y} put on the same list; the maze steps (0x3DF2E0, 0x3DF540, 0x3E06F1, 0x3F40DE) and the warp tiles (0x3F4670) add theirs so. Read: landmarks, named enemies, area names at exits |
+| near links | 0x3608A0 / 0x3614C0 / 0x361750 | (u8 bank, DRLG room), from the build step and 0x328DA0: the room's near rooms of its own area (0x3614C0: the array at +0x10 cleared (+0x18 count), the area's rooms (+0x90 -> +0x10, next +0x48) within 6 tiles of it, sorted), then for each of its flags' bits 4..11 (`test [room+0x50], 0xFF0`; none for level 133) the area that vis slot names (0x360800) - made (GetLevel 0x3267C0) and its rooms made (0x3271C0) when they are not -, and 0x361750 (bank, room, slot, the other area's first room, its slot back, the warp id 0x3DAAD0): for a warp (id not -1) the first room of the other area whose flags have the slot back is pushed among the near rooms and gets a link node (0x30 bytes: +0 that room, +8 the next, +0x10 1, +0x20 the warp's record 0x3DA970 (bank, area, slot, 'b'); the room's +0x78 the list's head); for a walk-through (id -1) every room of the other area with the slot back within 6 tiles is pushed among the near rooms, no node. Last, flag 0x800000 for a room whose area is not one 0x327850 says and that has a near room in one. Read (the near rooms, the links): area names at exits |
+| vis and warp slots | 0x360800 / 0x3DAAD0 / 0x326A80 / 0x3F1C60 / 0x3EDE60 | an area's eight vis slots (0x360800 (bank, DRLG, area) -> int[8]) and their warp ids (0x3DAAD0 (bank, area record, slot)): the DRLG's own list first (+0x118: records 0x50 bytes {+0 area, +4 vis[8], +0x24 warp[8], +0x48 next}, made by 0x326A80 as a copy of the area's LevelDefs row, +0x48 vis, +0x68 warp), else the row's. The outdoor link generator 0x3F1C60 (an act's outdoor areas placed by its link table: each area's place and size into its record, +0x24 x, +0x28 y, +0x2C width, +0x30 height, tiles; 0x327650 sets them from LevelDefs for the others) gives two linked areas a vis slot each other's with warp -1 (0x327760), unless the DRLG's +0x870 byte is 4. levels.txt names no vis between outdoor areas (Blood Moor's slots 3..6 are the Den of Evil's four ways in, warps 0..3). An outdoor area's room flags (0x3EDE60, by its 8-tile grid cell): every cell of the area's edge toward a linked area gets that area's slot bit - the whole border, not the gap. Read (through the near links): area names at exits |
+| warp records (LvlWarp) | 0x3DA970 | (u8 bank, area record, slot, direction 'l' / 'r' / 'b') -> the record: data tables +0x1890 (count +0x1898), 0x60 bytes: +0x00 name, +0x2C id (the slot's warp id), +0x48 / +0x4C OffsetX / OffsetY, +0x5C direction ('b' both). Matches the loader's lvlwarp.bin. Read: area names at exits |
+| a warp tile's preset unit | 0x3F4670 | (bank, DRLG room, tile x, y, tile flags, orientation 0xB right else left): the record for the area, the slot in the tile's flags (>> 0x14 & 0x3F) and the direction; a unit of type 5 put on the room's list by the room preset add, its class the record's id (+0x2C), at the tile less the room's tile x and y, times five, plus the record's offsets. Read: area names at exits (a type 5 preset unit with a link whose record has its id is the warp's tile) |
+| collision map | 0x366250 / 0x2EFB30 | (room, x, y, mask) -> the flags at a subtile (0x27 when no room has it): the room that holds the point (0x38DFB0: 0x2F0680 on the ActiveRoom's subtiles +0x80 .. +0x8C, else its near rooms 0x2EFDE0), its collision map (0x2EFB30: ActiveRoom +0x38) {+0 x, +4 y, +8 width, +0x0C height (subtiles), +0x10 / +0x14 tiles, +0x20 u16 flags, row by row}. The bits (D2's): 1 a wall, 2 sight, 4 missiles, 8 a player does not cross, 0x20 no floor, 0x400 an object, 0x800 a door, 0x1000 a unit; the game places a player with the mask 0x1C09 (0x491CA0, 0x2EF8B0). Read: area names at exits (walkable: neither 1 nor 8) |
+| the sewer stairs, stairs | 0x5E9DA0 / 0x5A11A0 / 0x590160 | object operate functions 44 (Act 3's sewer stairs, class 366: only in mode 2, open, then 0x5A11A0: the player warped (0x491FF0) through the tile unit (type 5) in the stairs' room) and 47 (the "stair" objects 194 / 195: opened, then through the room's tile unit too). The lever (class 367, OperateFn 45) has an icon of its own (cell 304). Act 3's Sewers Level 1 (92) names no vis slot for Level 2 (93): its four are the Bazaar's and Upper Kurast's (warps 58 / 59); the way down is the stairs over warp 60 ("Act 3 Sewer Down", NoInteract). Read: landmarks (the stairs put on ahead) |
+| a room's monsters made | 0x503790 | (game, ActiveRoom): the server's population of a room, the first time it is activated (from 0x4042A0, which makes a room's units and wakes its sleeping ones, and 0x408670): the random monsters (0x505D70, whose packs make random uniques and champions through 0x49AF30 -> 0x49EDB0) and the layout's preset monsters (0x48DC50 -> 0x50A050: a super unique through its maker 0x499BA0). So nothing knows of a random unique or a Herald before a player has come near its room. Read: named enemies (why they are marked from when they are first seen) |
+| SuperUniques rows | 0x499BA0 | data tables +0x1078 (count +0x1080), 0x3C bytes: +0x00 u16 the row, +0x02 u16 the name's string id (the game fills it in at its load; 0 in the loader's compiled rows), +0x08 the MonStats class, +0x0C hcIdx (the maker's switch on special ones). The maker (0x499BA0) sets the monster's kind 2 and 8 and its super unique id (0x38E810: monster data +0x2A; the client's monster from its packet 0x98FA0 too). Read (the name): named enemies |
+| a static path's place | 0x34D540 | (unit, room, x, y): +0x00 the room, +0x10 / +0x14 the subtiles, +0x08 / +0x0C the pixels (0x334E00: (x - y) * 16, (x + y) * 8). So a layout object's icon key is the one the reveal gives its unit. Read |
 Client map (UI thread): a dynamic path's room at +0x20 is an ActiveRoom; ActiveRoom +0x18 the DrlgRoom (0x192B20),
 DrlgRoom +0x10 near rooms (+0x18 count), +0x48 next in its level, +0x50 flags, +0x58 ActiveRoom, +0x60/+0x64/+0x68/+0x6C
 tile x/y/w/h, +0x74 type, +0x90 level; Level +0x10 first room, +0x1C8 the DRLG, +0x1F8 id (0x360FC0); DRLG +0x830
@@ -1456,6 +1509,14 @@ thread under Proton), the server's frames (the tick, 25 a second) and the plugin
   the panel. The presents a second are no longer counted (nothing read them).
 - The area names with their levels (the level-name hook, at every frame the automap is open): put together once per
   name, difficulty and table read, then compared.
+- Named enemies on the map (the hook on the automap's draw of one unit): the game draws its automap at every frame it
+  is open (the minimap too), and calls the routine for each unit of the rooms near the player; under the switch a
+  monster costs a few reads (its kind and row; a named one its name, the client's hostility test and three drawing
+  calls, and its mark kept up to date), and the local player's own call draws the marks of the layer whose monster is
+  not drawn itself now (a few: spawn spots, and named monsters left behind) and the exits' names of the area the
+  player is in (a few). Nothing when the automap is not drawn or both switches are off. The landmarks, the spawn spots
+  and the exits are read in the map reveal's area pass, once per area and act visit (an exit area's border rooms: a
+  few hundred reads of their collision maps).
 - The tick was left as it is: 25 a second, a dozen stat reads, the refills and the mirrors that are what the
   switches do, a flag each for the tables, the presets and the terror look (every 5 s: nothing but a shard or the
   switch changes manual terror, and the look is the check that it holds).
@@ -1606,7 +1667,7 @@ pass changes nothing.
    automatic affix picker, curse skill step,
    Cursed monster modifier step, vendor payment, client's portal trip, portal use, portal town end, town portal
    cast, wake in town, client's NPC menu, item free, socket contents free, cube products, item notice, enemy test,
-   kept target, AI dispatcher, killself timer), "the item writer
+   kept target, AI dispatcher, killself timer, automap's draw of one unit), "the item writer
    sends every item's real level to the client", "thread service: UI work accepted", "character: N presets in ...".
    No line begins with "seeds:" any more.
 2. F7 panel; Esc menu shows it automatically; the Character section shows the class and points once in a game.
@@ -2086,3 +2147,65 @@ pass changes nothing.
    revives of yours stayed past their time". A switch greyed with a reason beside it, or a warning that begins
    "sites: ... revives time out as the game has them" or "permanent revives:", is a routine or a table read wrong:
    send the log.
+37. Landmarks on the map (log: "sites: automap: draw one unit (marker and name) 0xD76E0 hits=1", "sites: map: landmarks,
+   named enemies waypoint tiles: the per-tile add 0xD5160 onto a layer's +0x8, the tile lookup's records 0x2A9A8C8 (...);
+   object icons: the list insert 0xD1460 onto a layer's +0x58, an Objects row's cell +0x164, the stash (class 267) in
+   acts 3..4, the sewer stairs (class 366) in mode 2, the Arcane waypoint (class 402) in level 74; a room's preset
+   units; the unit draw's transform 0xD4910, marker 0xD6DB0, name 0xD6B20 (an NPC's color 4), unit name 0x9A1B0", "game:
+   on the map: a tile's add bound, a cell's insert bound, the unit draw's transform, marker and name bound", "map:
+   landmarks ready (waypoint tiles yes, object icons yes), named enemies ready", in a game "map: bank 3: 148 object
+   classes with an icon (the waypoints' 307), 66 super uniques (the first "Bishibosh"), 23 bosses (Andariel, ...)",
+   "settings: ... landmarks=0"). Reveal the map off, Landmarks on the map on (F7, Display), a new game in Act 1: as you
+   enter the Blood Moor and then the Cold Plains, the automap shows the area's waypoint and its shrines and wells at
+   once, far from you, on an otherwise black map ("landmarks: level 3 (layer 0, act 1): N object icons on the map (N
+   new), M waypoint tiles put on"). Walk to one: when it comes on screen nothing changes (no second icon beside it).
+   In the Stony Field the Cairn Stones show, in the Dark Wood the Inifuss tree, in the Forgotten Tower its tome, in the
+   Arcane Sanctuary the portals and the waypoint, Act 5's waypoints too (objects there: "... (no waypoint of this
+   kind of area is a floor tile)"). A dungeon (the Den of Evil, a cave, the Catacombs): its waypoint at once; its
+   random shrines and wells still appear as you come near (the game makes them then). With Reveal the map on as well:
+   the whole area plus the shrines and the rest at once. Save and Exit, load: the icons are still there (saved with
+   the map). The console: `cabbycodes landmarks on|off` and the status line "map: landmarks=1, this game N areas, N
+   object icons and M waypoint tiles put on; ...". A switch greyed with a reason, or a warning that begins "sites: the
+   automap's reveal of a room does not put ...", "sites: CreateActiveRoom does not keep a room's preset units ..." or
+   "map:", is a routine or a table read wrong: send the log. Should the game stop as you enter an area with the switch
+   on, send d2rloader.log. With this build (the room's own preset list, log "sites: map: area names at exits a built
+   room's own preset units at +0x98; ..."): in the Flayer Dungeon Level 3 Khalim's Brain chest (the sparkle chest
+   icon) is on the map as you enter; in Act 3's Sewers Level 1 the lever's icon and the stairs down (closed until the
+   lever is pulled) at once; Khalim's Heart chest in Level 2, Khalim's Eye chest in the Spider Cavern, the Horadric
+   Cube's and Scroll's chests, the Staff of Kings' chest likewise. The "landmarks: level N ..." lines count more icons
+   in dungeons than before.
+38. Named enemies on the map (log: as item 37, "hooks: automap's draw of one unit hooked at 0xD76E0", "settings: ...
+   enemies=0"). F7, Display, tick "Named enemies on the map", open the automap (Tab) or have the minimap on. In the Cold
+   Plains a red cross with "Bishibosh" marks his camp as soon as you enter ("named enemies: level 3 (layer 0): 1 spawn
+   spot - Bishibosh"), far away. Walk up: as he comes near the cross follows him ("named enemies: Bishibosh (monster
+   class 58, kind 0xA) drawn on the map"), one cross, not two. Walk away without killing him: his cross stays where he
+   was last seen, however far you go (zoom the map out, or go to the next area of the same map). Kill him: his cross
+   goes and does not come back in this game ("named enemies: Bishibosh (level 3) seen dead - its mark is let go for
+   this game"); a new game marks it again. A random unique (a gold-named pack leader) gets a red cross with its whole
+   name once you have come near enough for the game to make its pack, and keeps it after you leave, until it dies;
+   its minions get nothing. A champion pack: a red cross on each, the monster's name once, in blue. Andariel's, Duriel's, the Summoner's, Izual's, the Countess's, Pindleskin's,
+   Nihlathak's and the Ancients' spawn spots are marked when you enter their areas; in a terror zone a Herald gets a
+   cross. Town folk keep the game's own white crosses, your mercenary and summons theirs (no red ones). The names are
+   drawn even with the game's own automap names option off. Switch it off: the crosses go at once. The console:
+   `cabbycodes enemies on|off` and the status line "map: ...; enemies=1, N spawn spots read, M named enemies drawn (J
+   of them on the map now), K marks let go as their monster died". `cabbycodes perf` with the automap open in a fight: "automap unit (each)"
+   well under a microsecond. Should the game stop when the automap opens, send d2rloader.log.
+39. Area names at exits (log: "sites: collision: a subtile's flags in its room's map 0x366250 / DRLG: a warp tile's preset
+   unit 0x3F4670" hits=1 each, "sites: map: area names at exits a built room's own preset units at +0x98; its near
+   rooms at +0x10, its warp links at +0x78 (a warp's id at +0x2C, its tile's preset unit of type 5), an ActiveRoom's
+   collision map at +0x38", "map: landmarks ready (...), named enemies ready, area names at exits ready", in a game
+   "map: bank 3: ... 138 levels (137 named: level 2 "Blood Moor")", "settings: ... exits=0"). F7, Display, tick "Area
+   names at exits", open the automap (Tab) or have the minimap on. Rogue Encampment: "Blood Moor" at the camp's gate.
+   Blood Moor: "Rogue Encampment" by the gate, "Cold Plains" at the opening into it, "Den of Evil" on the cave's
+   entrance ("exits: level 2 (layer 0): 3 exits - Den of Evil (a warp), Rogue Encampment (an opening of N subtiles),
+   Cold Plains (an opening of M subtiles)"). Walk into the Cold Plains: Blood Moor's names go, the Cold Plains' come:
+   "Blood Moor" on this side of the same opening, "Stony Field", "Burial Grounds", "Cave Level 1". Inside the Den of
+   Evil: "Blood Moor" at the way out. A dungeon (the Catacombs, the Act 2 sewers, the Durance of Hate): the stairs
+   down and up named. Act 2: Lut Gholein's trap door "Sewers Level 1" and the palace's "Harem Level 1"; the Canyon of
+   the Magi's seven "Tal Rasha's Tomb". Act 3's jungle borders, Act 4's, Act 5's outdoor areas the same way as Act 1's.
+   Without Reveal the map the names stand on the black map where the exits are. Act 3's Sewers Level 1 names no way
+   down (the stairs the lever opens: Landmarks on the map shows them). The console: `cabbycodes exits on|off`, and in
+   the status line "exits=1, N areas, W warps and B openings named (E on the map now)". To send: a name in the wrong
+   place, an opening named where nothing can be crossed, or one missing; a warning "exits: level N: R built rooms have
+   no collision map where their place says" or "sites: a built room is not linked to the areas next to it ...". Should
+   the game stop as you enter an area with the switch on, send d2rloader.log.

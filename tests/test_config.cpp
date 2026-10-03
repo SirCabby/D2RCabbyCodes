@@ -64,6 +64,7 @@ int main() {
   CHECK(!s.infinite_imbue && !s.infinite_sockets && !s.infinite_personalize);
   CHECK(!s.infinite_cube_ingredients && !s.auto_identify);
   CHECK(!s.passive_mercenary && !s.passive_minions && !s.permanent_revives);
+  CHECK(!s.map_named_enemies && !s.map_landmarks && !s.map_exit_names);
   CHECK(!s.logging && !s.trace);  // the log is written only when the file says so,
   CHECK(s.log_level == d2rcc::LogLevel::kInfo);  // ... and then all of it
 
@@ -72,7 +73,7 @@ int main() {
   if (std::ifstream f{"res/cabbycodes.toml", std::ios::binary}) {
     const std::string shipped((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     Settings installed;
-    CHECK(parse(shipped, &installed) == 59);
+    CHECK(parse(shipped, &installed) == 62);
     CHECK(rewrite(shipped, Settings{}) == shipped);
     CHECK(!installed.logging && installed.log_level == d2rcc::LogLevel::kInfo && !installed.trace);
   } else {
@@ -113,6 +114,8 @@ int main() {
   s.infinite_cube_ingredients = true;
   s.home_town = 5;
   s.reveal_map = true;
+  s.map_landmarks = true;
+  s.map_exit_names = true;
   s.item_level = true;
   s.remember_automap = true;
   s.remember_show_items_unfiltered = true;
@@ -137,7 +140,9 @@ int main() {
   CHECK(text.find("# Master switch.\r\n") != std::string::npos);
   CHECK(text.find("[d2rl]\r\nmatch = []\r\n") != std::string::npos);
   // Keys the file lacks are appended to the table, in their order, before the next table.
-  CHECK(text.find("reveal_map = true\r\nitem_level = true\r\nchronicle_only = true\r\n"
+  CHECK(text.find("reveal_map = true\r\nmap_named_enemies = false\r\nmap_landmarks = true\r\nmap_exit_names = true\r\n"
+                  "item_level = true\r\n"
+                  "chronicle_only = true\r\n"
                   "extra_drops_elites_only = true\r\n"
                   "all_socketed = true\r\nmax_affixes = true\r\n"
                   "best_affixes = true\r\ndamage_multiplier = 7.5\r\n"
@@ -156,7 +161,7 @@ int main() {
                   "logging = false\r\nlog_level = \"warning\"\r\n\r\n[d2rl]") != std::string::npos);
 
   Settings back;
-  CHECK(parse(text, &back) == 59);
+  CHECK(parse(text, &back) == 62);
   CHECK(back.cannot_be_cursed && back.infinite_gold && back.home_town == 5);
   CHECK(!back.infinite_imbue && back.infinite_sockets && back.infinite_personalize);
   CHECK(back.infinite_cube_ingredients);
@@ -173,6 +178,7 @@ int main() {
   CHECK(!back.cannot_be_frozen && back.cannot_be_poisoned);
   CHECK(!back.infinite_town_portal && !back.infinite_identify && back.infinite_potions && back.auto_identify);
   CHECK(back.infinite_keys && back.no_durability_loss && back.reveal_map && back.item_level);
+  CHECK(!back.map_named_enemies && back.map_landmarks && back.map_exit_names);
   CHECK(back.remember_automap && !back.remember_show_items && back.remember_show_items_unfiltered);
   CHECK(back.automap_was_open && !back.show_items_was_on && back.show_items_unfiltered_was_on);
 
@@ -184,7 +190,7 @@ int main() {
   CHECK(filled.find("toggle_key = \"INSERT\"\nlogging = false\nlog_level = \"warning\"\ntrace = false\n") !=
         std::string::npos);
   Settings s3;
-  CHECK(parse(filled, &s3) == 59);
+  CHECK(parse(filled, &s3) == 62);
   CHECK(s3.cannot_be_cursed && s3.infinite_gold && s3.home_town == 5);
   CHECK(!s3.infinite_imbue && s3.infinite_sockets && s3.infinite_personalize);
   CHECK(s3.infinite_cube_ingredients && s3.auto_identify);

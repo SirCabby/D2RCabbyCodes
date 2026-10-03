@@ -54,6 +54,9 @@ enum Kind : int {
   kInfinitePersonalize, // ... Anya personalizes
   kInfiniteCubeIngredients,  // a Horadric Cube recipe uses nothing up: its ingredients come back to the inventory
   kRevealMap,           // the whole map of the area you are in, and of each one you enter, on the automap
+  kMapEnemies,          // named enemies on the automap (a red cross and the name), and their spawn spots
+  kMapLandmarks,        // the landmarks the automap shows once you are near (waypoints, shrines...), at once
+  kMapExits,            // the name of the area each exit leads to, on the automap (cave entrances, stairs, borders)
   kItemLevel,           // an item's level after its name (weapons, armor, rings, amulets, charms, jewels)
   kRememberAutomap,     // a loaded character gets the automap open or closed as it was when a game was last left
   kRememberShowItems,   // ... Show Items on or off (only in the game's Toggle mode for it)

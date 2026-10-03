@@ -28,6 +28,9 @@ struct Settings {
   bool area_level_automap = false;   // the area's level after its name on the automap
   bool area_level_waypoints = false; // ... and in the waypoint list
   bool reveal_map = false;           // the whole map of each area you are in, on the automap
+  bool map_named_enemies = false;    // named enemies on the automap, and the spawn spots of super uniques and bosses
+  bool map_landmarks = false;        // the landmarks the automap shows once you are near (waypoints, shrines...), at once
+  bool map_exit_names = false;       // the name of the area each exit leads to, on the automap
   bool item_level = false;           // an item's level after its name (weapons, armor, jewelry, charms, jewels)
   bool monster_health_bars = false;  // a short life bar above every enemy on screen
   bool boss_health_bar = false;      // an act boss's life at the top centre while it is near

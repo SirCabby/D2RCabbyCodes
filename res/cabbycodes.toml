@@ -119,6 +119,21 @@ area_level_waypoints = false
 # area you enter after it.
 reveal_map = false
 
+# Named enemies on the automap: unique and super unique monsters, bosses,
+# terror zone Heralds and champions get a red cross with their name (a champion
+# pack's once, in blue), and keep it where they were last seen, however far you
+# go; the spawn spots of the super uniques and bosses of each area you enter
+# are marked too. A mark goes once its monster is seen dead.
+map_named_enemies = false
+# Landmarks on the automap at once: what the automap shows only once you are
+# near - waypoints, shrines, wells, quest objects - for each area you enter
+# (what its layout places; a dungeon's random shrines keep the game's rule).
+map_landmarks = false
+# The name of the area each exit leads to, on the automap, for each area you
+# enter: at a cave's entrance or a dungeon's stairs, and at each opening where
+# one area meets the next.
+map_exit_names = false
+
 # An item's level after its name, as in "Grand Charm (91)": weapons, armor,
 # rings, amulets, charms and jewels (not quest items or throwing potions).
 item_level = false

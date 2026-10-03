@@ -27,6 +27,7 @@
 #include "itemseed.h"
 #include "loot.h"
 #include "hometown.h"
+#include "mapmarks.h"
 #include "movespeed.h"
 #include "npcservice.h"
 #include "passive.h"
@@ -98,6 +99,8 @@ using PortalTripFn = uint64_t(__fastcall*)(Unit* player, Unit* portal) noexcept;
 using NpcMenuFn = uint64_t(__fastcall*)(Unit* npc, int32_t after_speech) noexcept;
 // God mode: whether a stat of a kind of unit may go down (the stat, the unit type) -> nonzero when it may not.
 using ProtectedStatFn = bool(__fastcall*)(int32_t stat, int32_t unit_type) noexcept;
+// Named enemies on the map: the automap's draw of one unit (the unit, the automap's view).
+using AutomapUnitFn = void(__fastcall*)(Unit* unit, const void* view) noexcept;
 
 ExecuteEventsFn g_orig_execute = nullptr;
 FinalizeDamageFn g_orig_finalize = nullptr;
@@ -148,6 +151,8 @@ passive::EnemyTestFn g_orig_enemy_test = nullptr;
 passive::KeptTargetFn g_orig_kept_target = nullptr;
 // Permanent revives: the killself monster mod's timer (revive.h).
 revive::TimerFn g_orig_killself = nullptr;
+// Named enemies on the map: the automap's draw of one unit (mapmarks.h).
+AutomapUnitFn g_orig_automap_unit = nullptr;
 volatile LONG g_pay_seen = 0;          // the first payments not taken are logged
 volatile LONG g_hit_wear_seen = 0;     // the first skipped wear of each kind is logged
 volatile LONG g_impale_wear_seen = 0;
@@ -389,6 +394,10 @@ void tick(void* game, Unit* player) {
   if (const uint8_t bank = game::unit_table_bank(player);
       !cheats::why_not(cheats::kPermanentRevives) && !revive::ready(bank) && (st.ticks % 125) == 1)
     revive::collect();  // Revive's pet type (the killself timer's hook asks)
+  if (const uint8_t bank = game::unit_table_bank(player);
+      (on(cheats::kMapLandmarks) || on(cheats::kMapEnemies) || on(cheats::kMapExits)) && !mapmarks::ready(bank) &&
+      (st.ticks % 125) == 1)
+    mapmarks::collect();  // the object icons, monsters' kinds and names, and the areas' names the map's marks read
   hometown::on_tick(game, player, st.ticks);  // the acts' towns, and the ones the character can reach
   npcservice::on_tick();  // an NPC's service switched on: no quest asks for it in the game's NPC table
   terror::on_tick(game, st.ticks);  // all areas terrorized: every act's zone applied as a shard applies it
@@ -837,6 +846,14 @@ uint64_t __fastcall hk_portal_trip(Unit* player, Unit* portal) noexcept {
 uint64_t __fastcall hk_npc_menu(Unit* npc, int32_t after_speech) noexcept {
   npcservice::menu_opens(npc);
   return g_orig_npc_menu ? g_orig_npc_menu(npc, after_speech) : 0;
+}
+
+// The automap's draw of one unit (the thread that draws the automap): the game's marker and name first, then under
+// the switch a named enemy's red cross and name, and at the local player's own call the named enemies' spawn spots
+// (mapmarks.cpp, with the game's own drawing calls).
+void __fastcall hk_automap_unit(Unit* unit, const void* view) noexcept {
+  if (g_orig_automap_unit) g_orig_automap_unit(unit, view);
+  mapmarks::unit_drawn(unit, view);
 }
 
 // A cube recipe's products (the transmute's second pass, after the characters were saved). Under the switch the
@@ -1300,6 +1317,11 @@ bool install() {
   const char* revive_why = revive::bind();
   const bool killself =
       !revive_why && install_one(sites::kKillSelfTimer, &hk_killself_timer, &g_orig_killself, "killself timer");
+  // Named enemies on the map: the automap's draw of one unit, after which a named enemy is drawn (mapmarks.cpp, which
+  // sets the switch's why_not once it is bound).
+  mapmarks::set_draw_hooked(game::has_map_draw() &&
+                            install_one(sites::kAutomapUnitDraw, &hk_automap_unit, &g_orig_automap_unit,
+                                        "automap's draw of one unit"));
 
   cheats::set_why_not(cheats::kGodMode, g_life_guarded || execute ? nullptr : "damage routines not hooked");
   cheats::set_why_not(cheats::kInfiniteMana, regen ? nullptr : "stat regeneration not hooked");
@@ -1461,6 +1483,7 @@ void uninstall() {
   g_orig_enemy_test = nullptr;
   g_orig_kept_target = nullptr;
   g_orig_killself = nullptr;
+  g_orig_automap_unit = nullptr;
   cube::hooked(false);
   hometown::wake_hooked(false);
   g_book_debit_return = 0;

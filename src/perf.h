@@ -19,6 +19,7 @@ enum Scope : int {
   kBarsShown,      //     ... and the bars it made of them)
   kMapReveal,      // ... the map reveal, and the frames it looked at the map at all
   kMapRevealLook,
+  kMapMarksRoom,   //     ... of it the landmarks and spawn spots of a room (each)
   kRemember,       // ... the automap and Show Items, and the frames they were looked at
   kRememberLook,
   kUiRequeue,      // ... and asking the loader for the next frame's callback
@@ -28,6 +29,7 @@ enum Scope : int {
   kTick,           // the server tick, 25 times a second
   kPresent,        // the present hook, once a frame: everything below it
   kOverlayFrame,   // ... the frame drawn over the game's (the health bars, the panel)
+  kMapMarksDraw,   // the named enemies' part of the automap's draw of one unit (each unit the automap draws)
   kScopeCount
 };
 

@@ -88,6 +88,16 @@ using TakeOutFn = Unit*(__fastcall*)(void* inventory, Unit* item) noexcept;
 using IdentifyFn = void(__fastcall*)(void* game, Unit* player, Unit* item, uint32_t own) noexcept;
 // Which of a player's pet lists a unit is in (player, unit id) -> the pet type, 0 when it is in none.
 using PetTypeFn = int32_t(__fastcall*)(Unit* player, uint32_t unit_id) noexcept;
+// The automap: a tile put on a layer's list (u8 bank, the tile, its DRLG room, the list), a cell put on one (the list,
+// {node, bool} out, the key: u16 0, u16 cell, int32 x, int32 y), a point of the map on the automap's screen (the view,
+// out, x | y << 32 pixels) -> out, one of its unit markers (x | y << 32, marker, scale), a name (UTF-8, x | y << 32,
+// scale, color), and the client's name of a unit.
+using MapPutTileFn = void(__fastcall*)(uint32_t bank, void* tile, void* room, void* list) noexcept;
+using MapInsertFn = void*(__fastcall*)(void* list, void* out, const void* key) noexcept;
+using MapPointFn = uint64_t*(__fastcall*)(const void* view, uint64_t* out, uint64_t pixels) noexcept;
+using MapMarkerFn = void(__fastcall*)(uint64_t point, uint32_t marker, float scale) noexcept;
+using MapNameFn = void(__fastcall*)(const char* text, uint64_t point, float scale, uint32_t color) noexcept;
+using UnitNameFn = const char*(__fastcall*)(Unit* unit) noexcept;
 
 GetStatFn g_get = nullptr;
 GetStatFn g_get_base = nullptr;
@@ -151,6 +161,12 @@ FirstItemFn g_first_item = nullptr;
 TakeOutFn g_take_out = nullptr;
 IdentifyFn g_identify = nullptr;
 PetTypeFn g_pet_type = nullptr;
+MapPutTileFn g_map_put_tile = nullptr;
+MapInsertFn g_map_insert = nullptr;
+MapPointFn g_map_point = nullptr;
+MapMarkerFn g_map_marker = nullptr;
+MapNameFn g_map_name = nullptr;
+UnitNameFn g_unit_name = nullptr;
 uintptr_t g_key_press[kKeyActionCount] = {};  // the entry's press function as bind checked it (0: unusable)
 bool g_key_wrapped[kKeyActionCount] = {};
 bool g_cure_failed = false;  // an unlink left its list on the unit: the cure stays off
@@ -369,6 +385,15 @@ bool bind() {
   }
   g_identify = sites::identify_facts().known ? at<IdentifyFn>(sites::kItemIdentify) : nullptr;
   g_pet_type = sites::revive_facts().known ? at<PetTypeFn>(sites::kPetTypeOf) : nullptr;
+  {
+    const sites::MapFacts& m = sites::map_facts();
+    g_map_put_tile = m.tiles ? reinterpret_cast<MapPutTileFn>(m.tile_add) : nullptr;
+    g_map_insert = m.objects ? reinterpret_cast<MapInsertFn>(m.list_insert) : nullptr;
+    g_map_point = m.draw ? reinterpret_cast<MapPointFn>(m.to_map) : nullptr;
+    g_map_marker = m.draw ? reinterpret_cast<MapMarkerFn>(m.draw_marker) : nullptr;
+    g_map_name = m.draw ? reinterpret_cast<MapNameFn>(m.draw_name) : nullptr;
+    g_unit_name = m.draw ? reinterpret_cast<UnitNameFn>(m.unit_name) : nullptr;
+  }
   bind_key_actions();
   g_cure_failed = false;
   g_bound = g_get && g_set && g_server_lookup;
@@ -392,6 +417,9 @@ bool bind() {
   logf("game: key search %s (key item type 0x%X), map reveal %s, automap save %s", has_key_check() ? "bound" : "MISSING",
        sites::key_item_type(), has_map_reveal() ? "bound" : "MISSING",
        automap_saves_any_size() ? "has the checked cell count" : "NOT CHECKED");
+  logf("game: on the map: a tile's add %s, a cell's insert %s, the unit draw's transform, marker and name %s",
+       has_map_tiles() ? "bound" : "MISSING", has_map_objects() ? "bound" : "MISSING",
+       has_map_draw() ? "bound" : "MISSING");
   logf("game: key actions: Automap %s, Show Items %s, Show Items (Unfiltered) %s; display modes %s",
        key_binding_note(kKeyAutomap), key_binding_note(kKeyShowItems), key_binding_note(kKeyShowItemsUnfiltered),
        g_name_display[0] && g_name_display[1] && g_setting_value ? "bound" : "MISSING");
@@ -1063,6 +1091,15 @@ int level_layer(uint8_t bank, int level_id) {
   return record && mem::read_safe(record + kLevelDefLayer, &layer) ? layer : -1;
 }
 
+// The per-tile add's own question (0x3269B0): the level record's level type.
+int level_type(uint8_t bank, int level_id) {
+  const int at = sites::map_facts().level_type_at;
+  if (!g_level_def || level_id <= 0 || at <= 0) return -1;
+  const uintptr_t record = reinterpret_cast<uintptr_t>(g_level_def(bank, level_id));
+  int32_t type = -1;
+  return record && mem::read_safe(record + static_cast<uintptr_t>(at), &type) ? type : -1;
+}
+
 void* level_first_room(void* level) {
   return level ? reinterpret_cast<void*>(mem::read_ptr(reinterpret_cast<uintptr_t>(level) + kLevelFirstRoom)) : nullptr;
 }
@@ -1077,6 +1114,88 @@ bool reveal_room(uint8_t bank, void* room) {
   if (!active) return false;
   g_automap_room(active);
   return true;
+}
+
+void* build_room(uint8_t bank, void* room) { return room && g_create_room ? g_create_room(bank, room) : nullptr; }
+
+void reveal_built_room(void* active_room) {
+  if (active_room && g_automap_room) g_automap_room(active_room);
+}
+
+bool has_map_tiles() { return g_map_put_tile && sites::derived(sites::dAutomapLayer); }
+bool has_map_objects() { return g_map_insert && sites::derived(sites::dAutomapLayer); }
+
+// The active layer: what the automap draws, and where the game's own reveal puts what it reveals.
+static uintptr_t automap_owner() {
+  const uintptr_t at = sites::derived(sites::dAutomapLayer);
+  return at ? mem::read_ptr(at) : 0;
+}
+
+bool map_put_tile(uint8_t bank, void* tile, void* room) {
+  const uintptr_t owner = automap_owner();
+  if (!g_map_put_tile || !owner || !tile || !room) return false;
+  g_map_put_tile(bank, tile, room, reinterpret_cast<void*>(owner + static_cast<uintptr_t>(sites::map_facts().floor_list)));
+  return true;
+}
+
+// The key the game's unit cell add makes (0xD52B0): a tag of 0 (1 is a cell read back from the map's save), the cell,
+// and where it goes. The insert answers {the node, whether it is new}.
+bool map_put_cell(uint16_t cell, int32_t x, int32_t y) {
+  struct Key {
+    uint16_t tag;
+    uint16_t cell;
+    int32_t x, y;
+  };
+  static_assert(sizeof(Key) == 12, "the key the list insert copies");
+  const uintptr_t owner = automap_owner();
+  if (!g_map_insert || !owner || !cell) return false;
+  const Key key{0, cell, x, y};
+  alignas(16) uint8_t out[16] = {};
+  g_map_insert(reinterpret_cast<void*>(owner + static_cast<uintptr_t>(sites::map_facts().object_list)), out, &key);
+  return out[8] != 0;
+}
+
+// The automap's view, as its draw of one unit reads it: the rectangle it draws in (x, y, width, height) and the
+// scale of its markers.
+constexpr uintptr_t kViewRect = 0x18;
+constexpr uintptr_t kViewScale = 0x38;
+
+bool has_map_draw() { return g_map_point && g_map_marker && g_map_name && g_unit_name; }
+
+bool map_point(const void* view, int32_t px, int32_t py, uint64_t* point) {
+  if (!g_map_point || !view) return false;
+  uint64_t out = 0;
+  g_map_point(view, &out, static_cast<uint32_t>(px) | static_cast<uint64_t>(static_cast<uint32_t>(py)) << 32);
+  int32_t rect[4] = {};
+  if (!mem::copy_from(rect, reinterpret_cast<uintptr_t>(view) + kViewRect, sizeof(rect))) return false;
+  const int32_t x = static_cast<int32_t>(out), y = static_cast<int32_t>(out >> 32);
+  if (x < rect[0] || y < rect[1] || x >= rect[0] + rect[2] || y >= rect[1] + rect[3]) return false;
+  *point = out;
+  return true;
+}
+
+float map_scale(const void* view) {
+  float scale = 1.0f;
+  return view && mem::read_safe(reinterpret_cast<uintptr_t>(view) + kViewScale, &scale) ? scale : 1.0f;
+}
+
+void map_marker(uint64_t point, int marker, float scale) {
+  if (g_map_marker && marker >= 0 && marker < 8) g_map_marker(point, static_cast<uint32_t>(marker), scale);
+}
+
+void map_name(const char* text, uint64_t point, float scale, int color) {
+  if (g_map_name && text && text[0]) g_map_name(text, point, scale, static_cast<uint32_t>(color));
+}
+
+int map_name_color() { return sites::map_facts().name_color; }
+
+const char* client_unit_name(Unit* u) { return g_unit_name && u ? g_unit_name(u) : nullptr; }
+
+// The game's getters (0x34AF60 / 0x34AFB0) read a unit's path at +0x08 and +0x0C whatever the unit: the static path of an
+// object and the dynamic one of a monster keep their pixels there.
+bool unit_pixels(Unit* u, int32_t* x, int32_t* y) {
+  const uintptr_t path = u ? mem::read_ptr(reinterpret_cast<uintptr_t>(u) + kUnitPath) : 0;
+  return path && mem::read_safe(path + 0x08, x) && mem::read_safe(path + 0x0C, y);
 }
 
 bool has_key_action(KeyAction a) {

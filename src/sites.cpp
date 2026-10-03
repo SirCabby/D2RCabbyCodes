@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <initializer_list>
 #include <vector>
 
 #include "log.h"
@@ -545,6 +546,21 @@ const Spec kSpecs[kCount] = {
      "48 89 5C 24 10 56 57 41 56 48 83 EC 20 8B F2 48 8B F9 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 75 13 48 8D 4C 24 50 88 "
      "44 24 50 E8 ?? ?? ?? ?? 84 C0 74 01 CC 4C 8B B3 98 00 00 00",
      0, 0x4FF3B0},
+    // The automap's draw of one unit: the view kept in rdi, the unit in rbp; the marker decision (the call, with the
+    // marker at [rsp+60h] and the name's kind at [rsp+68h]), then the party option (`cmp dword [rip+disp], 0`) for the
+    // party's markers 1 and 4.
+    {kAutomapUnitDraw, "automap: draw one unit (marker and name)",
+     "48 89 6C 24 10 57 48 83 EC 40 48 8B FA 4C 8D 44 24 68 48 8D 54 24 60 48 8B E9 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? "
+     "?? ?? 83 3D ?? ?? ?? ?? 00 75 16 83 7C 24 60 01 0F 84 ?? ?? ?? ?? 83 7C 24 60 04 0F 84 ?? ?? ?? ??",
+     0, 0xD76E0},
+    {kCollisionFlags, "collision: a subtile's flags in its room's map",
+     "48 89 6C 24 10 56 57 41 56 48 83 EC 20 41 8B F9 41 8B F0 8B EA 41 BE 27 00 00 00 E8 ?? ?? ?? ?? 48 85 C0 74 ?? "
+     "48 8B C8 48 89 5C 24 40 E8",
+     0, 0x366250},
+    {kWarpTilePreset, "DRLG: a warp tile's preset unit",
+     "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 40 83 7C 24 78 0B 41 8B F0 4C 8B 44 "
+     "24 70 41 8B F9 41 B9 6C 00 00 00 B8 72 00 00 00 44 0F 44 C8",
+     0, 0x3F4670},
 };
 
 Result g_results[kCount];
@@ -566,6 +582,7 @@ IdentifyFacts g_identify;
 bool g_protected_checked = false;
 bool g_enemy_checked = false;
 ReviveFacts g_revive;
+MapFacts g_map;
 
 // The bytes of an instruction's RIP-relative operand, as an absolute address.
 uintptr_t rip_operand(uintptr_t insn, int disp_at, int len) {
@@ -639,6 +656,7 @@ const IdentifyFacts& identify_facts() { return g_identify; }
 bool protected_stat_checked() { return g_protected_checked; }
 bool enemy_test_checked() { return g_enemy_checked; }
 const ReviveFacts& revive_facts() { return g_revive; }
+const MapFacts& map_facts() { return g_map; }
 uintptr_t call_target(Id id) { return call_at(address(id)); }
 
 size_t entry_bytes(Id id, uint8_t* out, size_t capacity) {
@@ -1554,6 +1572,267 @@ void derive() {
                         : "the pet removal does not ask the pet lookup first");
     }
   }
+  // Named enemies and landmarks on the map. The automap callback's last call (`mov r8d, 1`: the whole room) is the
+  // reveal of a built room. It walks the room's floor tiles (the getter: the room's +0x08, its tiles at +0x20 and their
+  // count at +0x28; 0x48 bytes a tile, its flags at +0x18, 8 one never put on) and puts each on the layer's floor list
+  // with the per-tile add, which skips a tile already on the map (flag 0x40000), asks the tile lookup with the level's
+  // type and the tile's type, style and sequence (three getters of the tile's graphics record) and puts the cell on
+  // with the list insert. A tail jump then walks the room's units: an object's icon is its Objects row's cell, the
+  // stash's only in two acts, the sewer stairs' only open, the Arcane Sanctuary's waypoint only there; the unit cell
+  // add puts it on the layer's units list at the unit's pixels / 10 plus (1, -3), with the same list insert.
+  g_map = MapFacts{};
+  {
+    const uintptr_t callback = address(kAutomapRoomCallback);
+    const uintptr_t whole = callback ? find_in(callback, 0xB0, "41 B8 01 00 00 00 48 8B D6 40 0F B6 CF E8") : 0;
+    const uintptr_t reveal = whole ? call_at(whole + 13) : 0;
+    const uintptr_t floor_get = reveal ? find_in(reveal, 0x60, "48 8D 54 24 68 49 8B CD 89 7C 24 68 4C 8B F8 E8") : 0;
+    const uintptr_t floor_tiles = floor_get ? call_at(floor_get + 15) : 0;
+    const bool tile_list = floor_tiles && find_in(floor_tiles, 0x30, "48 8B 71 08 48 85 F6 74 ?? 48 8B 76 28") &&
+                           find_in(floor_tiles, 0x60, "89 37 48 8B 43 08 48 8B 40 20") &&
+                           find_in(reveal, 0xA0, "48 8D 14 C9 41 8B 4C D4 18 49 8D 14 D4 F6 C1 08");
+    const uintptr_t floor_add = reveal ? find_in(reveal, 0xA0, "4C 8D 4D ?? 4D 8B C7 41 0F B6 CE E8") : 0;
+    const uintptr_t tile_add = floor_add ? call_at(floor_add + 11) : 0;
+    const uintptr_t tail = reveal ? find_in(reveal, 0x140,
+                                            "48 8D 55 ?? 49 8B CD 48 8B 5C 24 50 48 8B 6C 24 58 48 8B 74 24 60 48 83 "
+                                            "C4 20 41 5F 41 5E 41 5D 41 5C 5F E9")
+                                  : 0;
+    const uintptr_t unit_pass = tail ? jmp_at(tail + 35) : 0;
+    // The per-tile add: the on-the-map flag, the four questions it asks the lookup with, and its list insert.
+    const bool add_skips = tile_add && find_in(tile_add, 0x40, "8B 42 18 4D 8B F9 4D 8B F0 48 8B EA 0F BA E0 12 0F 82");
+    const uintptr_t asks = tile_add ? find_in(tile_add, 0x90,
+                                              "8B 90 F8 01 00 00 E8 ?? ?? ?? ?? 48 8B 4D 20 8B F0 E8 ?? ?? ?? ?? 48 8B 4D "
+                                              "20 8B F8 E8 ?? ?? ?? ?? 48 8B 4D 20 8B D8 E8 ?? ?? ?? ?? 44 8B C8 44 8B C3 "
+                                              "8B D7 8B CE E8")
+                                    : 0;
+    const uintptr_t level_type = asks ? call_at(asks + 6) : 0;
+    const uintptr_t lookup = asks ? call_at(asks + 54) : 0;
+    const auto field_of = [](uintptr_t getter) {
+      const uintptr_t at = getter ? find_in(getter, 0x40, "8B 41 ?? 48 83 C4 20 5B C3") : 0;
+      return at ? byte_at(at + 2) : -1;
+    };
+    const int tile_type = asks ? field_of(call_at(asks + 17)) : -1;
+    const int tile_style = asks ? field_of(call_at(asks + 28)) : -1;
+    const int tile_sequence = asks ? field_of(call_at(asks + 39)) : -1;
+    const bool type_of_level = level_type && find_in(level_type, 0x14, "48 83 EC 28 E8 ?? ?? ?? ?? 8B 40 ?? 48 83 C4 28 C3") &&
+                               call_at(level_type + 4) == derived(dLevelDefRecord);
+    const uintptr_t insert_at =
+        tile_add ? find_in(tile_add, 0x140, "4C 8D 44 24 38 49 8B CF 48 89 44 24 3C 48 8D 54 24 28 E8") : 0;
+    const uintptr_t list_insert = insert_at ? call_at(insert_at + 18) : 0;
+    // The lookup: by level type the range of records it walks, and in it the first whose level type and tile type are
+    // the tile's, whose style is the tile's or 0xFF, and whose sequences are 0xFF or hold the tile's; one of its cells.
+    const uintptr_t index_at = lookup ? find_in(lookup, 0x60, "48 8D 0D ?? ?? ?? ?? 42 8B 3C F9 42 8B 74 F9 04") : 0;
+    const uintptr_t records_at = lookup ? find_in(lookup, 0xC0, "48 8B 05 ?? ?? ?? ?? 48 C1 E1 05 44 39 3C 01") : 0;
+    const uintptr_t count_at = lookup ? find_in(lookup, 0xC0, "48 3B 1D ?? ?? ?? ??") : 0;
+    const uintptr_t records = records_at ? rip_operand(records_at, 3, 7) : 0;
+    bool record_layout = records && count_at && rip_operand(count_at, 3, 7) == records + 8;
+    for (const char* p : {"44 39 64 01 04", "80 7C 01 08 FF", "0F B6 4C 01 08 41 3B CD", "80 7C 01 09 FF",
+                          "0F B6 4C 01 09 41 3B CE 7F", "0F B6 4C 01 0A 41 3B CE 7D", "44 8B 4C 01 1C 45 85 C9 7F",
+                          "8B 44 97 0C"})
+      record_layout = record_layout && find_in(lookup, 0x360, p);
+    if (tile_list && add_skips && type_of_level && list_insert && index_at && record_layout && tile_type >= 0 &&
+        tile_style >= 0 && tile_sequence >= 0 && byte_at(floor_add + 3) > 0) {
+      g_map.tile_add = tile_add;
+      g_map.list_insert = list_insert;
+      g_map.floor_list = byte_at(floor_add + 3);
+      g_map.lookup_records = records;
+      g_map.lookup_index = rip_operand(index_at, 3, 7);
+      g_map.tile_type_at = tile_type;
+      g_map.tile_style_at = tile_style;
+      g_map.tile_sequence_at = tile_sequence;
+      g_map.level_type_at = byte_at(level_type + 11);
+      g_map.tiles = true;
+    } else if (callback) {
+      log_warn("sites: the automap's reveal of a room does not put its floor tiles on the way expected (%s) - no "
+               "waypoint is put on the map ahead",
+               !reveal ? "no reveal" : !tile_list ? "the tile list" : !add_skips ? "the per-tile add"
+               : !type_of_level ? "the level type" : !list_insert ? "the list insert"
+               : !record_layout || !index_at ? "the tile lookup" : "the tile getters");
+    }
+    // The units: the object branch (the Objects row's cell, then the three rules), and the unit cell add's key.
+    const uintptr_t branch = unit_pass ? find_in(unit_pass, 0x100,
+                                                 "E8 ?? ?? ?? ?? 48 8B F0 8B 90 ?? ?? ?? ?? 85 D2 0F 84 ?? ?? ?? ?? 81 "
+                                                 "EF ?? ?? ?? ?? 74 ?? 83 EF ?? 74 ?? 83 FF ?? 0F 85 ?? ?? ?? ?? 49 8B "
+                                                 "CF E8 ?? ?? ?? ?? 83 F8 ?? 0F 85")
+                                       : 0;
+    int32_t cell_at = 0, stash = 0;
+    const uintptr_t stash_rule = branch ? short_jump_at(branch + 28) : 0;
+    const uintptr_t stairs_rule = branch ? short_jump_at(branch + 33) : 0;
+    const bool rules = branch && mem::read_safe(branch + 10, &cell_at) && mem::read_safe(branch + 24, &stash) &&
+                       stash_rule && stairs_rule &&
+                       find_in(stash_rule, 0x20, "49 8B CF E8 ?? ?? ?? ?? 8B D0 41 0F B6 CE E8 ?? ?? ?? ?? 2C ?? 3C ?? 0F 87") ==
+                           stash_rule &&
+                       find_in(stairs_rule, 0x10, "48 8B CB E8 ?? ?? ?? ?? 83 F8 ?? 0F 85") == stairs_rule;
+    const uintptr_t unit_add_at = unit_pass ? find_in(unit_pass, 0x280, "4C 8B C5 48 8B CB E8") : 0;
+    const uintptr_t unit_add = unit_add_at ? call_at(unit_add_at + 6) : 0;
+    const uintptr_t unit_insert = unit_add ? find_in(unit_add, 0x90, "48 8B CD 89 44 24 34 E8") : 0;
+    const bool unit_key = unit_add && find_in(unit_add, 0x90, "41 FF C1") && find_in(unit_add, 0x90, "83 C2 FD") &&
+                          unit_insert && list_insert && call_at(unit_insert + 7) == list_insert;
+    if (rules && unit_key && byte_at(tail + 3) > 0 && cell_at > 0 && cell_at < 0x1000) {
+      g_map.object_list = byte_at(tail + 3);
+      g_map.object_cell_at = cell_at;
+      g_map.stash_class = stash;
+      g_map.stash_act = byte_at(stash_rule + 20);
+      g_map.stash_acts = byte_at(stash_rule + 22) + 1;
+      g_map.stairs_class = stash + byte_at(branch + 32);
+      g_map.stairs_mode = byte_at(stairs_rule + 10);
+      g_map.arcane_class = g_map.stairs_class + byte_at(branch + 37);
+      g_map.arcane_level = byte_at(branch + 54);
+      g_map.list_insert = list_insert;
+      g_map.objects = true;
+    } else if (callback) {
+      log_warn("sites: the automap's reveal of a room does not put its objects' icons on the way expected (%s) - no "
+               "object's icon is put on the map ahead",
+               !unit_pass ? "no unit pass" : !rules ? "the object rules" : "the unit cell add");
+    }
+    // CreateActiveRoom's preset step (a preset room, type 2, not made yet): the room's +0x40 points to its preset part
+    // (+0x08), whose units it makes from the room's DS1 file (+0x10) once: each a copy of the file's, linked at the
+    // part's +0x58 by +0x10, with its type (+0x20: 1 a monster, 2 an object), class (+0x04) and place (+0x08 x, +0x24
+    // y, subtiles of the level's map: the file's plus the room's).
+    const uintptr_t create = address(kCreateActiveRoom);
+    const uintptr_t step_at = create ? find_in(create, 0x40, "83 7B 74 02 75 ?? 48 8B D3 40 0F B6 CF E8") : 0;
+    const uintptr_t step = step_at ? call_at(step_at + 13) : 0;
+    const uintptr_t make_at = step ? find_in(step, 0x80, "4D 8D 46 30 48 8B D7 40 0F B6 CE E8") : 0;
+    const uintptr_t make = make_at ? call_at(make_at + 11) : 0;
+    const uintptr_t link_at =
+        make ? find_in(make, 0x340, "E8 ?? ?? ?? ?? 49 8B 4F 58 48 89 48 10 49 89 47 58 48 8B 76 10") : 0;
+    const uintptr_t copy = link_at ? call_at(link_at) : 0;
+    if (step && find_in(step, 0x40, "48 8B 42 40 4C 8B F2 0F B6 F1 48 8B 78 08 48 83 7F 10 00") && copy &&
+        find_in(copy, 0x80, "8B 47 20 89 43 20 8B 47 04 89 43 04") &&
+        find_in(copy, 0x90, "8B 4F 08 41 03 CC 89 4B 08 8B 4F 24 41 03 CF 89 4B 24")) {
+      g_map.presets = true;
+    } else if (create) {
+      log_warn("sites: CreateActiveRoom does not keep a room's preset units the way expected - no landmark or named "
+               "enemy is put on the map ahead");
+    }
+    // Then its build step (once, flag bit 20): the room's near rooms and warp links (when it has no near rooms yet),
+    // then its static grids, which for a preset room move the part's units that stand in the room into the room's own
+    // list (+0x98, by +0x10), their places made the room's (less its subtiles: tile x and y at +0x60 / +0x64, times
+    // five). Every other preset unit a room gets (a maze's, a warp tile's) the room preset add puts there too, the same
+    // way. So a built room's preset units are in its own list.
+    const uintptr_t build_at = create ? find_in(create, 0x60, "0F BA E0 14 72 ?? 48 8B D3 40 0F B6 CF E8") : 0;
+    const uintptr_t build = build_at ? call_at(build_at + 13) : 0;
+    const uintptr_t steps_at = build && find_in(build, 0x20, "48 83 7A 18 00")
+                                   ? find_in(build, 0x40, "75 05 E8 ?? ?? ?? ?? 48 8B D3 40 0F B6 CE E8")
+                                   : 0;
+    const uintptr_t near_links = steps_at ? call_at(steps_at + 2) : 0;
+    const uintptr_t grids = steps_at ? call_at(steps_at + 14) : 0;
+    const uintptr_t to_room_at = grids ? find_in(grids, 0x40,
+                                                 "8B 53 74 83 EA 01 74 ?? 83 FA 01 75 ?? 48 8B CB 48 8B 5C 24 30 48 83 "
+                                                 "C4 20 5F E9")
+                                       : 0;
+    const uintptr_t to_room = to_room_at ? jmp_at(to_room_at + 26) : 0;
+    const uintptr_t moved = to_room ? find_in(to_room, 0x2C0,
+                                              "48 8B 86 ?? ?? ?? ?? 48 89 43 10 48 89 9E ?? ?? ?? ??")
+                                    : 0;
+    int32_t own_list = 0, own_list2 = 0;
+    const bool room_moves = moved && mem::read_safe(moved + 3, &own_list) && mem::read_safe(moved + 14, &own_list2) &&
+                            own_list == own_list2 && own_list > 0 && own_list < 0x400 &&
+                            find_in(to_room, 0x2C0, "8B 46 60 48 8B 5D 58 44 8D 34 80 8B 46 64 44 8D 3C 80") &&
+                            find_in(to_room, 0x2C0, "44 29 73 08 44 29 7B 24");
+    // The warp tile's preset unit: of type 5, the warp's id (its record +0x2C) for its class, placed at the tile less
+    // the room's tile x and y, times five, plus the record's offset; put on by the room preset add, whose list is the
+    // same.
+    const uintptr_t warp_tile = address(kWarpTilePreset);
+    const uintptr_t warp_add_at =
+        warp_tile ? find_in(warp_tile, 0xD0, "44 8B 4D ?? C7 44 24 20 00 00 00 00 E8") : 0;
+    const uintptr_t room_add = warp_add_at ? call_at(warp_add_at + 12) : 0;
+    const uintptr_t warp_type_at = warp_tile ? find_in(warp_tile, 0xD0, "41 B8 ?? 00 00 00 03 4D 48") : 0;
+    const bool warp_room = warp_tile && find_in(warp_tile, 0x80, "2B 73 60 2B 7B 64");
+    int32_t add_list = 0;
+    const uintptr_t add_link = room_add ? find_in(room_add, 0x80, "48 8B 86 ?? ?? ?? ?? 49 89 40 10 49 8B C0 4C 89 86") : 0;
+    const bool add_places = room_add && find_in(room_add, 0x60, "89 58 20 89 78 04 89 08 8B 44 24 58 41 89 40 08 8B 44 24 "
+                                                                 "60 41 89 40 24");
+    const bool room_list = room_moves && add_link && add_places && mem::read_safe(add_link + 3, &add_list) &&
+                           add_list == own_list;
+    if (room_list) {
+      g_map.room_presets = true;
+      g_map.room_presets_at = own_list;
+    } else if (create) {
+      log_warn("sites: a built room does not keep its preset units in a list of its own the way expected (%s) - no "
+               "landmark or named enemy is put on the map ahead",
+               !build ? "no build step" : !grids ? "no static grids" : !room_moves ? "the move" : "the room preset add");
+    }
+    // Area names at exits. The near links: the room's near rooms of its own area first (the array at +0x10, its count
+    // at +0x18 cleared; the room's area at +0x90), then for each area its flags link it to, that area's rooms near it
+    // (pushed onto the same array) and, for a warp, a link node at +0x78 {+0 the room at the other end, +8 the next,
+    // +0x10 1, +0x20 the warp's record, whose id (+0x2C) the record getter compares}.
+    const uintptr_t same_area = near_links ? find_in(near_links, 0x30, "48 8B CA E8") : 0;
+    const uintptr_t own_near = same_area ? call_at(same_area + 3) : 0;
+    const bool near_reset = own_near && find_in(own_near, 0x20, "48 8B 81 90 00 00 00") &&
+                            find_in(own_near, 0x20, "48 C7 41 18 00 00 00 00");
+    const uintptr_t area_link_at = near_links ? find_in(near_links, 0x220,
+                                                        "4D 8B 4E 10 44 0F B6 C5 44 89 6C 24 28 48 8B D6 40 0F B6 CF "
+                                                        "88 5C 24 20 E8")
+                                              : 0;
+    const uintptr_t link = area_link_at ? call_at(area_link_at + 24) : 0;
+    const bool link_near = link && find_in(link, 0x200, "48 8D 4E 10 E8");
+    const uintptr_t node_at = link ? find_in(link, 0x200,
+                                             "48 89 38 48 8B 96 90 00 00 00 E8 ?? ?? ?? ?? 48 89 43 20 B8 01 00 00 00 "
+                                             "C7 43 10 01 00 00 00 48 8B 4E 78 48 89 4B 08")
+                                   : 0;
+    const uintptr_t warp_record = node_at ? call_at(node_at + 10) : 0;
+    const uintptr_t id_at = warp_record ? find_in(warp_record, 0x90, "41 39 7A 2C") : 0;
+    const uintptr_t tile_record_at = warp_tile ? find_in(warp_tile, 0x60, "41 80 E0 3F E8") : 0;
+    const bool same_record = warp_record && tile_record_at && call_at(tile_record_at + 4) == warp_record &&
+                             find_in(warp_tile, 0xD0, "44 8B 4D 2C");
+    // The collision map: an ActiveRoom's +0x38 (the getter), {+0 x, +4 y, +8 width, +0x0C height, +0x20 the flags,
+    // a u16 a subtile, row by row}.
+    const uintptr_t flags_at = address(kCollisionFlags);
+    const uintptr_t coll_get = flags_at ? call_at(flags_at + 45) : 0;
+    const bool collision = coll_get && find_in(coll_get, 0x08, "48 8B 41 38 C3") == coll_get &&
+                           find_in(flags_at, 0x90, "48 8B 53 20 48 85 D2 74 ?? 2B 73 04 0F AF 73 08 2B 2B 48 63 C5 48 "
+                                                   "63 CE 48 03 C8 44 0F B7 34 4A");
+    if (room_list && near_reset && link_near && id_at && same_record && warp_room && warp_type_at && collision) {
+      g_map.near_at = 0x10;
+      g_map.links_at = 0x78;
+      g_map.warp_id_at = byte_at(id_at + 3);
+      g_map.warp_preset_type = byte_at(warp_type_at + 2);
+      g_map.collision_at = 0x38;
+      g_map.exits = g_map.warp_preset_type > 0 && g_map.warp_id_at > 0;
+    }
+    if ((create || warp_tile || flags_at) && !g_map.exits)
+      log_warn("sites: a built room is not linked to the areas next to it the way expected (%s) - no area name is "
+               "written at an exit",
+               !room_list ? "its preset units" : !near_reset || !link_near ? "the near rooms"
+               : !id_at || !same_record ? "the warp links" : !warp_room || !warp_type_at ? "the warp tile's preset"
+                                                                                        : "the collision map");
+    // The automap's draw of one unit: the unit's pixels through the transform (`mov rcx, rdi`: the view), the view's
+    // rectangle (+0x18 x, +0x1C y, +0x20 width, +0x24 height), the marker with the view's scale (+0x38), then the name
+    // by its kind; the stash's (a string of the game's) and an NPC's (the client's unit name, in its color) go to the
+    // same name draw.
+    const uintptr_t draw = address(kAutomapUnitDraw);
+    const uintptr_t to_map_at = draw ? find_in(draw, 0x90, "48 8D 54 24 20 4C 8B 44 24 20 48 8B CF E8") : 0;
+    const uintptr_t marker_at = draw ? find_in(draw, 0xD0, "F3 0F 10 57 38 48 8B CB 8B 54 24 60 E8") : 0;
+    const uintptr_t stash_at =
+        draw ? find_in(draw, 0x200, "B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 45 33 C9 0F 28 D6 48 8B D3 48 8B C8 E8") : 0;
+    const uintptr_t name_draw = stash_at ? call_at(stash_at + 22) : 0;
+    const bool rect = draw && find_in(draw, 0xB0,
+                                      "8B 4F 18 3B D9 0F 8C ?? ?? ?? ?? 8B 57 1C 44 8B 44 24 24 44 3B C2 0F 8C ?? ?? "
+                                      "?? ?? 03 4F 20 3B D9 0F 8D ?? ?? ?? ?? 8B 4F 24 03 CA 44 3B C1 0F 8D");
+    uintptr_t npc_at = 0;
+    for (uintptr_t from = draw, end = draw + 0x200; from && from < end && !npc_at;) {
+      const uintptr_t at = find_in(from, end - from,
+                                   "F3 0F 10 77 38 48 8B CD E8 ?? ?? ?? ?? 41 B9 ?? ?? ?? ?? 0F 28 D6 48 8B D3 48 8B C8 E8");
+      if (!at) break;
+      if (name_draw && call_at(at + 28) == name_draw) npc_at = at;
+      from = at + 1;
+    }
+    int32_t color = -1;
+    if (to_map_at && marker_at && rect && name_draw && npc_at && mem::read_safe(npc_at + 15, &color) && color >= 0 &&
+        color < 32) {
+      g_map.to_map = call_at(to_map_at + 13);
+      g_map.draw_marker = call_at(marker_at + 12);
+      g_map.draw_name = name_draw;
+      g_map.unit_name = call_at(npc_at + 8);
+      g_map.name_color = color;
+      g_map.draw = g_map.to_map && g_map.draw_marker && g_map.unit_name;
+    }
+    if (draw && !g_map.draw)
+      log_warn("sites: the automap's draw of one unit is not made the way expected (%s) - no named enemy is drawn on "
+               "the map",
+               !to_map_at ? "the transform" : !marker_at ? "the marker" : !rect ? "the view's rectangle"
+               : !name_draw ? "the name draw" : "an NPC's name");
+  }
   static const char* const kNames[dCount] = {"client unit table",       "server unit table",
                                              "server GetUnitByIdAndType", "client GetUnitByIdAndType",
                                              "players take no damage",  "monsters take no damage",
@@ -1633,6 +1912,24 @@ void derive() {
   logf("sites: %-28s %sthe killself timer kills a player's pet with the pet removal 0x%llX, which asks the pet "
        "lookup first",
        "permanent revives", g_revive.known ? "" : "not derived ", rva_of(g_revive.pet_removal));
+  logf("sites: %-28s %swaypoint tiles: the per-tile add 0x%llX onto a layer's +0x%X, the tile lookup's records 0x%llX "
+       "(by level type 0x%llX; a tile's type +0x%X, style +0x%X, sequence +0x%X; a level's type +0x%X); %sobject "
+       "icons: the list insert 0x%llX onto a layer's +0x%X, an Objects row's cell +0x%X, the stash (class %d) in acts "
+       "%d..%d, the sewer stairs (class %d) in mode %d, the Arcane waypoint (class %d) in level %d; %sa room's preset "
+       "units; %sthe unit draw's transform 0x%llX, marker 0x%llX, name 0x%llX (an NPC's color %d), unit name 0x%llX",
+       "map: landmarks, named enemies", g_map.tiles ? "" : "(not derived) ", rva_of(g_map.tile_add), g_map.floor_list,
+       rva_of(g_map.lookup_records), rva_of(g_map.lookup_index), g_map.tile_type_at, g_map.tile_style_at,
+       g_map.tile_sequence_at, g_map.level_type_at, g_map.objects ? "" : "(not derived) ", rva_of(g_map.list_insert),
+       g_map.object_list, g_map.object_cell_at, g_map.stash_class, g_map.stash_act + 1,
+       g_map.stash_act + g_map.stash_acts, g_map.stairs_class, g_map.stairs_mode, g_map.arcane_class,
+       g_map.arcane_level, g_map.presets ? "" : "(not checked) ", g_map.draw ? "" : "(not derived) ",
+       rva_of(g_map.to_map), rva_of(g_map.draw_marker), rva_of(g_map.draw_name), g_map.name_color,
+       rva_of(g_map.unit_name));
+  logf("sites: %-28s %sa built room's own preset units at +0x%X; %sits near rooms at +0x%X, its warp links at +0x%X "
+       "(a warp's id at +0x%X, its tile's preset unit of type %d), an ActiveRoom's collision map at +0x%X",
+       "map: area names at exits", g_map.room_presets ? "" : "(not checked) ", g_map.room_presets_at,
+       g_map.exits ? "" : "(not checked) ", g_map.near_at, g_map.links_at, g_map.warp_id_at, g_map.warp_preset_type,
+       g_map.collision_at);
 }
 
 size_t dump_image(uintptr_t exe_base, const wchar_t* path) {

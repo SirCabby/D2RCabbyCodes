@@ -786,6 +786,26 @@ void draw_panel() {
     cheat_row(cheats::kRevealMap, "Reveal the map",
               "The whole map of the area you are in is revealed on the automap, and so is each area you enter "
               "after it. A large area fills in over a few frames.");
+    cheat_row(cheats::kMapLandmarks, "Landmarks on the map",
+              "What the automap shows of an area only once you have come near it - waypoints, shrines, wells, quest "
+              "objects (the Cairn Stones, the Inifuss tree, the Horadric and Khalim chests, the seals), the Arcane "
+              "Sanctuary's portals, trap doors and stairs - is on it as soon as you enter the area, wherever the "
+              "area's layout places them. The shrines and wells the game places at random in a dungeon as you come "
+              "near are in no layout: they appear as the game has them. What is put on is saved with the map, as "
+              "what you see yourself is.");
+    cheat_row(cheats::kMapEnemies, "Named enemies on the map",
+              "Unique and super unique monsters, bosses, champions and a terror zone's Heralds get a red cross on the "
+              "automap with their name above it, the way the game marks town folk (a champion pack's name once, in "
+              "the game's champion blue), however far away they are. Super uniques and bosses are marked from the "
+              "moment you enter their area (Bishibosh's camp, the Countess's floor, Andariel's lair...). Other "
+              "uniques, champions and Heralds do not exist until the game makes them - it makes a room's monsters as "
+              "you first come near the room - and are marked from then on, where they are or were last seen, "
+              "wherever you go, until they die. Minions and your own pets get none.");
+    cheat_row(cheats::kMapExits, "Area names at exits",
+              "The name of the area each exit leads to is written on the automap, for the area you are in and each "
+              "area you enter after it: at a cave's entrance, a dungeon's stairs or a trap door, and at each opening "
+              "where one area meets the next (the zone line between two outdoor areas, a town's gate). Where two areas "
+              "meet, each side names the other, a little inside its own area.");
 
     ImGui::Spacing();
     cheat_row(cheats::kAreaLevelAutomap, "Area level in the automap's area name",

@@ -42,7 +42,9 @@ const char* const kNames[kCount] = {"God mode",        "Infinite mana",   "Infin
                                     "Infinite gold",
                                     "Infinite imbues",      "Infinite sockets", "Infinite personalizing",
                                     "Infinite cube ingredients",
-                                    "Reveal the map",       "Item level",      "Keep the automap", "Keep Show Items",
+                                    "Reveal the map",       "Named enemies on the map", "Landmarks on the map",
+                                    "Area names at exits",
+                                    "Item level",      "Keep the automap", "Keep Show Items",
                                     "Keep Show Items (Unfiltered)", "Home town", "The log", "Respec",
                                     "Skill and attribute presets"};
 }  // namespace
@@ -98,6 +100,9 @@ void init(const config::Settings& s) {
   InterlockedExchange(&g_on[kInfiniteCubeIngredients], s.infinite_cube_ingredients ? 1 : 0);
   set_home_town(s.home_town);
   InterlockedExchange(&g_on[kRevealMap], s.reveal_map ? 1 : 0);
+  InterlockedExchange(&g_on[kMapEnemies], s.map_named_enemies ? 1 : 0);
+  InterlockedExchange(&g_on[kMapLandmarks], s.map_landmarks ? 1 : 0);
+  InterlockedExchange(&g_on[kMapExits], s.map_exit_names ? 1 : 0);
   InterlockedExchange(&g_on[kItemLevel], s.item_level ? 1 : 0);
   InterlockedExchange(&g_on[kRememberAutomap], s.remember_automap ? 1 : 0);
   InterlockedExchange(&g_on[kRememberShowItems], s.remember_show_items ? 1 : 0);
@@ -258,6 +263,9 @@ void to_settings(config::Settings* s) {
   s->infinite_cube_ingredients = g_on[kInfiniteCubeIngredients] != 0;
   s->home_town = home_town();
   s->reveal_map = g_on[kRevealMap] != 0;
+  s->map_named_enemies = g_on[kMapEnemies] != 0;
+  s->map_landmarks = g_on[kMapLandmarks] != 0;
+  s->map_exit_names = g_on[kMapExits] != 0;
   s->item_level = g_on[kItemLevel] != 0;
   s->remember_automap = g_on[kRememberAutomap] != 0;
   s->remember_show_items = g_on[kRememberShowItems] != 0;

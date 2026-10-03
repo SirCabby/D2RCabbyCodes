@@ -3,11 +3,13 @@
 #include <windows.h>
 
 #include <bitset>
+#include <initializer_list>
 
 #include "cheats.h"
 #include "game.h"
 #include "gate.h"
 #include "log.h"
+#include "mapmarks.h"
 #include "perf.h"
 
 namespace d2rcc::mapreveal {
@@ -18,13 +20,20 @@ constexpr int kMaxRooms = 8192;   // a level's room list is walked no further
 constexpr double kBudgetMs = 3.0; // building rooms per frame; a large area takes a few frames
 constexpr ULONGLONG kWaitNoteMs = 3000;
 // The map is looked at when something says the character may stand in an area not revealed yet (arm: an
-// area or act entered, a game joined, the switch), from then on every frame until that area is done - for
+// area or act entered, a game joined, a switch), from then on every frame until that area is done - for
 // this long at the most while it cannot be started (no character yet, the area not the one announced, the
 // automap on another layer) - and once a second besides, should an area be entered that nothing announced.
 constexpr ULONGLONG kArmedMs = 10000;
 constexpr ULONGLONG kSafetyLookMs = 1000;
 
-volatile LONG g_bound = 0;
+// What a pass over an area does with each room: reveal it whole, put on its landmarks, read its named enemies' spawn
+// spots, find its exits (the last three mapmarks.cpp's). Each is done once per level and act visit.
+enum Part : unsigned { kReveal = 1u, kLandmarks = 2u, kEnemies = 4u, kExits = 8u };
+constexpr int kParts = 4;
+constexpr unsigned kMarks = kLandmarks | kEnemies | kExits;
+
+volatile LONG g_bound = 0;      // the pass can run: the game's map routines are there
+volatile LONG g_reveal_ok = 0;  // ... and the reveal can
 volatile LONG g_reset = 0;  // a game was left: the UI thread forgets its per-game state
 volatile LONG g_armed = 0;  // the character may stand somewhere new
 volatile LONG g_announced = -1;  // ... in this level, when the loader said which (-1: not said)
@@ -37,8 +46,10 @@ volatile LONG g_rooms = 0;
 struct Job {
   void* level = nullptr;
   int id = -1;
+  unsigned parts = 0;
+  bool begun = false;
   int done = 0;     // rooms of the list handled
-  int built = 0;    // ... revealed
+  int built = 0;    // ... built
   int failed = 0;   // ... that the game could not build
   int frames = 0;
   double work_ms = 0.0;
@@ -47,12 +58,23 @@ struct Job {
   bool finished = false;
 };
 Job g_job;
-std::bitset<kMaxLevels> g_done;  // the levels revealed on the DRLG below
+std::bitset<kMaxLevels> g_done[kParts];  // the levels gone over on the DRLG below, per part
 void* g_drlg = nullptr;          // the client's DRLG (one per act): another one has new levels
 bool g_said_thread = false;
 gate::Work g_work(kArmedMs, kSafetyLookMs);  // when a frame looks at the map
 int g_wanted = -1;               // the level the loader announced, until the character is seen in it
 LARGE_INTEGER g_freq{};
+
+int index_of(unsigned part) { return part == kReveal ? 0 : part == kLandmarks ? 1 : part == kEnemies ? 2 : 3; }
+
+unsigned wanted_parts() {
+  unsigned parts = 0;
+  if (g_reveal_ok && cheats::enabled(cheats::kRevealMap)) parts |= kReveal;
+  if (mapmarks::landmarks_ready() && cheats::enabled(cheats::kMapLandmarks)) parts |= kLandmarks;
+  if (mapmarks::enemies_ready() && cheats::enabled(cheats::kMapEnemies)) parts |= kEnemies;
+  if (mapmarks::exits_ready() && cheats::enabled(cheats::kMapExits)) parts |= kExits;
+  return parts;
+}
 
 double ms_since(const LARGE_INTEGER& t0) {
   LARGE_INTEGER now;
@@ -62,10 +84,11 @@ double ms_since(const LARGE_INTEGER& t0) {
 }
 
 // One look at where the character stands, and the work on its area. True while the next frame has to look
-// again: the area is being revealed, or it cannot be started yet.
+// again: the area is being gone over, or it cannot be started yet.
 bool look(ULONGLONG now) {
   const bool may_wait = g_work.may_wait(now);
-  if (!cheats::enabled(cheats::kRevealMap)) {
+  const unsigned wanted = wanted_parts();
+  if (!wanted) {
     g_job = Job{};
     g_wanted = -1;
     return false;
@@ -74,7 +97,7 @@ bool look(ULONGLONG now) {
   if (!game::client_level(&lv)) return may_wait;  // no character in a level yet
   if (lv.drlg != g_drlg) {
     g_drlg = lv.drlg;
-    g_done.reset();
+    for (std::bitset<kMaxLevels>& d : g_done) d.reset();
     g_job = Job{};
   }
   // The loader may announce an area before the client's character stands in it: an area that is done
@@ -82,13 +105,22 @@ bool look(ULONGLONG now) {
   const bool elsewhere = g_wanted > 0 && lv.id != g_wanted && may_wait;
   if (!elsewhere) g_wanted = -1;
   const bool remembered = lv.id < kMaxLevels;
-  if (remembered && g_done[static_cast<size_t>(lv.id)]) return elsewhere;
-  const bool same = g_job.level == lv.level && g_job.id == lv.id;
-  if (same && g_job.finished) return elsewhere;
+  unsigned needed = wanted;
+  if (remembered)
+    for (const unsigned part : {kReveal, kLandmarks, kEnemies, kExits})
+      if (g_done[index_of(part)][static_cast<size_t>(lv.id)]) needed &= ~part;
+  // The landmarks, the spawn spots and the exits need the rows the tick reads (in the first second of a game).
+  const bool tables_wait = (needed & kMarks) && !mapmarks::ready(lv.bank);
+  if (tables_wait) needed &= ~kMarks;
+  const bool look_again = elsewhere || (tables_wait && may_wait);
+  if (!needed) return look_again;
+  const bool same = g_job.level == lv.level && g_job.id == lv.id && g_job.parts == needed;
+  if (same && g_job.finished) return look_again;
   if (!same) {
     g_job = Job{};
     g_job.level = lv.level;
     g_job.id = lv.id;
+    g_job.parts = needed;
     g_job.waiting_since = now;
   }
   // The game moves the automap to an area's layer shortly after the player enters the area. The
@@ -103,9 +135,14 @@ bool look(ULONGLONG now) {
     }
     return now - g_job.waiting_since < kArmedMs;  // then once a second
   }
+  if (!g_job.begun) {
+    g_job.begun = true;
+    if (needed & kMarks)
+      mapmarks::area_begins(lv.id, layer, lv.bank, needed & kLandmarks, needed & kEnemies, needed & kExits);
+  }
   if (!g_said_thread && log_enabled()) {
     g_said_thread = true;
-    logf("map reveal: revealing on the UI thread (%lu)", GetCurrentThreadId());
+    logf("map reveal: going over areas on the UI thread (%lu)", GetCurrentThreadId());
   }
   LARGE_INTEGER t0;
   QueryPerformanceCounter(&t0);
@@ -115,10 +152,13 @@ bool look(ULONGLONG now) {
   while (room && index < kMaxRooms) {
     if (index >= g_job.done) {
       if (!budget_left) break;
-      if (game::reveal_room(lv.bank, room))
+      if (void* built = game::build_room(lv.bank, room)) {
         ++g_job.built;
-      else
+        if (needed & kReveal) game::reveal_built_room(built);
+        if (needed & kMarks) mapmarks::room(room, built);
+      } else {
         ++g_job.failed;
+      }
       g_job.done = index + 1;
       budget_left = ms_since(t0) < kBudgetMs;
     }
@@ -129,14 +169,19 @@ bool look(ULONGLONG now) {
   ++g_job.frames;
   if (room && index < kMaxRooms) return true;  // more rooms next frame
   if (room) log_warn("map reveal: level %d has more than %d rooms - the rest stay hidden", lv.id, kMaxRooms);
-  if (remembered) g_done.set(static_cast<size_t>(lv.id));
-  InterlockedIncrement(&g_areas);
-  InterlockedExchangeAdd(&g_rooms, g_job.built);
-  logf("map reveal: level %d (layer %d): %d rooms revealed, %d not built, in %d frame%s (%.1f ms of work)", lv.id,
-       layer, g_job.built, g_job.failed, g_job.frames, g_job.frames == 1 ? "" : "s", g_job.work_ms);
-  cheats::note("Map revealed: %d rooms of this area", g_job.built);
+  if (remembered)
+    for (const unsigned part : {kReveal, kLandmarks, kEnemies, kExits})
+      if (needed & part) g_done[index_of(part)].set(static_cast<size_t>(lv.id));
+  if (needed & kReveal) {
+    InterlockedIncrement(&g_areas);
+    InterlockedExchangeAdd(&g_rooms, g_job.built);
+    logf("map reveal: level %d (layer %d): %d rooms revealed, %d not built, in %d frame%s (%.1f ms of work)", lv.id,
+         layer, g_job.built, g_job.failed, g_job.frames, g_job.frames == 1 ? "" : "s", g_job.work_ms);
+    cheats::note("Map revealed: %d rooms of this area", g_job.built);
+  }
+  if (needed & kMarks) mapmarks::area_ends();
   g_job.finished = true;
-  return false;
+  return tables_wait && may_wait;
 }
 
 }  // namespace
@@ -148,7 +193,8 @@ void bind(bool ui_thread) {
                     : !game::automap_saves_any_size() ? "the automap save cannot hold a whole area here"
                                                       : nullptr;
   cheats::set_why_not(cheats::kRevealMap, why);
-  InterlockedExchange(&g_bound, why ? 0 : 1);
+  InterlockedExchange(&g_reveal_ok, why ? 0 : 1);
+  InterlockedExchange(&g_bound, ui_thread && game::has_map_reveal() ? 1 : 0);
   logf("map reveal: %s", why ? why : "ready");
 }
 
@@ -162,7 +208,7 @@ void on_ui(ULONGLONG now) {
   perf::Timer timer(perf::kMapReveal);
   if (g_reset && InterlockedExchange(&g_reset, 0)) {
     g_job = Job{};
-    g_done.reset();
+    for (std::bitset<kMaxLevels>& d : g_done) d.reset();
     g_drlg = nullptr;
     g_work.stop();
     g_wanted = -1;

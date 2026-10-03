@@ -35,6 +35,7 @@
 #include "itemlevel.h"
 #include "itemseed.h"
 #include "loot.h"
+#include "mapmarks.h"
 #include "mapreveal.h"
 #include "remember.h"
 #include "hometown.h"
@@ -60,7 +61,7 @@ constexpr D2RL::PluginInfo kInfo{
                    "freeze, poison or curses, infinite potions, scrolls, keys and gold, items identified as you "
                    "pick them up, imbues, sockets and "
                    "personalizing without their quests, cube recipes that use nothing up, no durability loss, respec "
-                   "and skill presets, map reveal, "
+                   "and skill presets, map reveal, named enemies, landmarks and where each exit leads on the map, "
                    "health bars for monsters and act bosses, a home town of your choice, and the automap and Show "
                    "Items kept the way you left them between games.",
     .flags = D2RL::PluginFlags::Shared | D2RL::PluginFlags::NativeHooks,
@@ -139,14 +140,16 @@ void log_settings() {
   logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d revives=%d unfreezable=%d "
        "unpoisonable=%d uncursable=%d tp=%d id=%d "
        "autoid=%d potions=%d keys=%d gold=%d imbue=%d addsockets=%d personalize=%d cube=%d durability=%d home=%d "
-       "map=%d keep map=%d items=%d unfiltered=%d (remembered %d/%d/%d) log=%d/%s trace=%d",
+       "map=%d enemies=%d landmarks=%d exits=%d keep map=%d items=%d unfiltered=%d (remembered %d/%d/%d) log=%d/%s "
+       "trace=%d",
        static_cast<double>(g_settings.damage_multiplier), g_settings.invincible_mercenary,
        g_settings.invincible_minions, g_settings.passive_mercenary, g_settings.passive_minions,
        g_settings.permanent_revives, g_settings.cannot_be_frozen, g_settings.cannot_be_poisoned,
        g_settings.cannot_be_cursed, g_settings.infinite_town_portal, g_settings.infinite_identify,
        g_settings.auto_identify, g_settings.infinite_potions, g_settings.infinite_keys, g_settings.infinite_gold,
        g_settings.infinite_imbue, g_settings.infinite_sockets, g_settings.infinite_personalize,
-       g_settings.infinite_cube_ingredients, g_settings.no_durability_loss, g_settings.home_town, g_settings.reveal_map, g_settings.remember_automap,
+       g_settings.infinite_cube_ingredients, g_settings.no_durability_loss, g_settings.home_town, g_settings.reveal_map,
+       g_settings.map_named_enemies, g_settings.map_landmarks, g_settings.map_exit_names, g_settings.remember_automap,
        g_settings.remember_show_items, g_settings.remember_show_items_unfiltered, g_settings.automap_was_open,
        g_settings.show_items_was_on, g_settings.show_items_unfiltered_was_on, g_settings.logging,
        config::log_level_name(g_settings.log_level), g_settings.trace);
@@ -353,6 +356,7 @@ void start_pump() {
   if (!g_strings) log_warn("LocalizationService unavailable: the boss bar shows no names");
   healthbars::set_services(ctx, g_tables, g_strings);
   itemlevel::set_services(ctx, g_tables, g_strings);
+  mapmarks::set_services(ctx, g_tables, g_strings);
   if (ctx->QueryService(&g_widgets) != D2RL::ServiceQueryResult::Success ||
       !D2RL::HasWidgetServiceField(g_widgets, D2RL::WidgetServiceRequiredSize) || !g_widgets->dispatchUiAction) {
     g_widgets = nullptr;
@@ -390,6 +394,7 @@ DWORD WINAPI worker(void*) {
   hooks::install();
   healthbars::bind(g_threads != nullptr);
   mapreveal::bind(g_threads != nullptr);
+  mapmarks::bind(g_threads != nullptr);
   remember::bind(g_threads != nullptr);
   g_bound = true;
 #ifdef D2RCC_DEV
@@ -449,6 +454,7 @@ void __cdecl on_gameplay_event(const D2RL::PluginContext*, const D2RL::Lifecycle
     chronicle::game_left();
     character::game_left();
     mapreveal::game_left();
+    mapmarks::game_left();
     remember::game_left();
     terror::game_left();
     hometown::game_left();
@@ -719,7 +725,9 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                                      {"autoid", cheats::kAutoIdentify},
                                      {"potions", cheats::kInfinitePotions}, {"keys", cheats::kInfiniteKeys},
                                      {"durability", cheats::kNoDurabilityLoss}, {"tz", cheats::kTerrorAll},
-                                     {"map", cheats::kRevealMap}, {"ilvl", cheats::kItemLevel},
+                                     {"map", cheats::kRevealMap}, {"enemies", cheats::kMapEnemies},
+                                     {"landmarks", cheats::kMapLandmarks}, {"exits", cheats::kMapExits},
+                                     {"ilvl", cheats::kItemLevel},
                                      {"keepmap", cheats::kRememberAutomap},
                                      {"keepitems", cheats::kRememberShowItems},
                                      {"keepunfiltered", cheats::kRememberShowItemsUnfiltered},
@@ -1015,6 +1023,22 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                 cheats::why_not(cheats::kItemLevel) ? cheats::why_not(cheats::kItemLevel) : "",
                 itemlevel::names_shown());
   say(line);
+  {
+    // Landmarks, named enemies and exits on the map: the switches, why they cannot work, and what this game came to.
+    const mapmarks::Stats ms = mapmarks::stats();
+    const char* lm_why = cheats::why_not(cheats::kMapLandmarks);
+    const char* en_why = cheats::why_not(cheats::kMapEnemies);
+    const char* ex_why = cheats::why_not(cheats::kMapExits);
+    std::snprintf(line, sizeof(line),
+                  "map: landmarks=%d%s%s, this game %u areas, %u object icons and %u waypoint tiles put on; enemies=%d%s%s, "
+                  "%u spawn spots read, %u named enemies drawn (%u of them on the map now), %u marks let go as their "
+                  "monster died; exits=%d%s%s, %u areas, %u warps and %u openings named (%u on the map now)",
+                  cheats::enabled(cheats::kMapLandmarks), lm_why ? " - " : "", lm_why ? lm_why : "", ms.areas, ms.icons,
+                  ms.waypoints, cheats::enabled(cheats::kMapEnemies), en_why ? " - " : "", en_why ? en_why : "",
+                  ms.spots, ms.drawn, ms.kept, ms.dead, cheats::enabled(cheats::kMapExits), ex_why ? " - " : "",
+                  ex_why ? ex_why : "", ms.exit_areas, ms.warps, ms.borders, ms.exits);
+    say(line);
+  }
   const terror::Stats terror_stats = terror::stats();
   const char* terror_why = cheats::why_not(cheats::kTerrorAll);
   std::snprintf(line, sizeof(line), "terror: all areas=%d%s%s; %s, %d areas terrorized, %d zones applied by the switch",
@@ -1048,7 +1072,8 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
       "keys on|off | "
       "gold on|off | imbue on|off | addsockets on|off | personalize on|off | cube on|off | durability on|off | "
       "home 0..5 | "
-      "map on|off | ilvl on|off | keepmap on|off | keepitems on|off | keepunfiltered on|off | log on|off | "
+      "map on|off | enemies on|off | landmarks on|off | ilvl on|off | keepmap on|off | keepitems on|off | "
+      "keepunfiltered on|off | log on|off | "
       "loglevel info|warning|error | respec | preset [save|load <name>] | "
       "save | sites | dump | dropcheck [walks] | perf [seconds]");
   return D2RL::ConsoleCommandResult::Handled;

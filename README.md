@@ -42,6 +42,15 @@ Press F7, or open the game's Esc menu, and the panel is there.
   so is the Moo Moo Farm: every area a terror zone can take, for the whole game.
 - **Map reveal** - the whole map of the area you are in is revealed on the automap, and so is every area you
   enter after it.
+- **Landmarks on the map** - what the automap shows only once you have come near it - waypoints, shrines, wells,
+  quest objects and chests, Act 3's sewer stairs and their lever - is on it as soon as you enter an area, wherever
+  the area's layout places them.
+- **Named enemies on the map** - unique and super unique monsters, bosses, champions and Heralds get a red cross on
+  the automap with their name, however far away: super uniques and bosses from the moment you enter their area, the
+  rest from the moment the game makes them (as you first come near their room), until they die.
+- **Area names at exits** - the name of the area each exit leads to, on the automap: at a cave's entrance, a
+  dungeon's stairs or a trap door, and at each opening where one area meets the next (the zone line between two
+  outdoor areas, a town's gate), for the area you are in.
 - **Area levels** - each area's monster level for the current difficulty after its name, in the automap's area
   text and in the waypoint list.
 - **Item level** - an item's level after its name in its tooltip, as in "Grand Charm (91)": weapons, armor, rings,
@@ -151,12 +160,15 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
   *Character* (respec,
   presets), *Loot* (loot filter drops, Chronicle drops, extra drops, perfect rolls, all superior, all ethereal, all
   socketed, max affixes, best affixes),
-  *Display* (map reveal, area levels, item level, health bars), *Quality of life* (the automap and Show Items kept
+  *Display* (map reveal, landmarks, named enemies and area names at exits on the map, area levels, item level, health
+  bars), *Quality of
+  life* (the automap and Show Items kept
   between games, your home town) and *Diagnostics* (the log switched on or off, and how severe a line must be to be written).
   Hover an option or a (?) mark for details.
 - Settings are written to `cabbycodes.toml` the moment you change them.
 - The D2RLoader console (Ctrl+` when enabled in the loader's settings) has a `cabbycodes` command:
-  `status`, `panel`, `god|mana|stamina|exit|bars|bossbar|map|ilvl on|off`, `exp <multiplier>`, `dmg <multiplier>`,
+  `status`, `panel`, `god|mana|stamina|exit|bars|bossbar|map|ilvl on|off`, `landmarks|enemies|exits on|off`
+  (landmarks, named enemies and area names at exits on the map), `exp <multiplier>`, `dmg <multiplier>`,
   `speed <percent>`, `merc|minions|unfreezable|unpoisonable|uncursable|tp|id|potions|keys|gold|durability on|off`,
   `passivemerc|passiveminions on|off` (your mercenary or your summons fight nothing),
   `revives on|off` (your revives stay until they die),
@@ -207,6 +219,9 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `area_level_automap` | `false` | The area's level after its name in the automap's area text. |
 | `area_level_waypoints` | `false` | The area's level after each destination in the waypoint list. |
 | `reveal_map` | `false` | The whole map of the area you are in, and of every area you enter after it, on the automap. |
+| `map_landmarks` | `false` | The landmarks the automap shows only once you are near (waypoints, shrines, wells, quest objects and chests, Act 3's sewer stairs and lever) are on it as soon as you enter an area, where its layout places them. A dungeon's random shrines and wells keep the game's own rule. |
+| `map_named_enemies` | `false` | Unique and super unique monsters, bosses, champions and Heralds get a red cross with their name on the automap however far away they are: super uniques and bosses from the moment you enter their area, random uniques, champions and Heralds from the moment the game makes them (as you first come near their room), until they die. |
+| `map_exit_names` | `false` | The name of the area each exit leads to on the automap, for the area you are in: at cave entrances, stairs and trap doors, and at each opening where one area meets the next. |
 | `item_level` | `false` | An item's level after its name in its tooltip: weapons, armor, rings, amulets, charms and jewels. |
 | `monster_health_bars` | `false` | A short life bar above every enemy on screen (HD graphics). |
 | `boss_health_bar` | `false` | An act boss's name and life at the top centre of the screen while it is near. |
@@ -429,6 +444,11 @@ only a line at each start that says so, and what you ask for by name.
 - **Map reveal** reveals an area as you enter it (a large one fills in over a few frames), once per visit to an
   act. It is the game's own automap, as if you had explored the whole area. Only the map is revealed: monsters,
   chests, shrines and waypoints show on it once you have been near them, as usual.
+- **Area names at exits** are found as you enter an area: a warp (a cave's entrance, stairs, a trap door) by the
+  game's own link between its room and the area at its other end, a border by where its rooms meet the next area's
+  and where a player can walk across. Where two areas meet, each names the other on its own side, and only the
+  names of the area you are in are shown. The way down from Act 3's Sewers Level 1 is the stairs the lever opens,
+  which no link of the area names: Landmarks on the map shows the stairs and the lever instead.
 - **Kept between games.** One state for every character: the last one you left a game with. It is put back while
   the game loads, the way its key would change it (as if you pressed Tab or the Show Items key), so it is there when
   the loading screen goes away. The two Show Items options need the game's own display option for that key (Item
@@ -527,7 +547,11 @@ The map reveal hooks nothing either. On the same UI thread it reads which area y
 of the map, waits until the automap has moved to that area's layer, then builds each room of the area with the
 game's own room builder and hands it to the automap's own "reveal this room" callback, the one the game uses to
 reveal a room whole. It looks when the loader says you entered an area or a game (and once a second, should an area
-not be announced), not at every frame; while an area is being revealed the work goes on from frame to frame.
+not be announced), not at every frame; while an area is being revealed the work goes on from frame to frame. The
+landmarks, the named enemies' spawn spots and the area names at exits are read in the same pass, from what the room
+builder makes: a room's preset units, its links to the areas next to it, its collision map. The named enemies and
+the exits' names are drawn by one hook, on the automap's own draw of a unit, with the game's own marker and name
+routines.
 
 Keeping the automap and Show Items between games hooks nothing. On the UI thread, while a game runs, it reads whether
 the automap panel is open and whether each Show Items key is on, from the same places the game's own getters read:
