@@ -17,6 +17,7 @@
 #include "context.h"
 #include "dev.h"
 #include "dropodds.h"
+#include "enemies.h"
 #include "game.h"
 #include "healthbars.h"
 #include "hooks_game.h"
@@ -59,7 +60,7 @@ constexpr D2RL::PluginInfo kInfo{
     .author = "SirCabby",
     .description = "In-game cheat panel for offline play: god mode, infinite mana, experience and damage "
                    "multipliers, movement speed, exit before death, invincible or passive mercenary and minions, "
-                   "revives that stay until they die, no "
+                   "revives that stay until they die, enemies without immunities or affixes, no "
                    "freeze, poison or curses, infinite potions, scrolls, keys and gold, items identified as you "
                    "pick them up, imbues, sockets and "
                    "personalizing without their quests, cube recipes that use nothing up, gear without its level, "
@@ -140,15 +141,16 @@ void log_settings() {
        g_settings.perfect_rolls, g_settings.all_superior, g_settings.all_ethereal, g_settings.all_socketed,
        g_settings.max_affixes, g_settings.best_affixes, config::key_name(g_settings.toggle_key),
        g_settings.show_on_pause);
-  logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d revives=%d unfreezable=%d "
-       "unpoisonable=%d uncursable=%d tp=%d id=%d "
+  logf("settings: damage=x%.2f merc=%d minions=%d passivemerc=%d passiveminions=%d revives=%d noimmunities=%d "
+       "noaffixes=%d unfreezable=%d unpoisonable=%d uncursable=%d tp=%d id=%d "
        "autoid=%d potions=%d keys=%d gold=%d imbue=%d addsockets=%d personalize=%d cube=%d requirements=%d/%d "
        "durability=%d home=%d "
        "map=%d enemies=%d landmarks=%d exits=%d keep map=%d items=%d unfiltered=%d (remembered %d/%d/%d) log=%d/%s "
        "trace=%d",
        static_cast<double>(g_settings.damage_multiplier), g_settings.invincible_mercenary,
        g_settings.invincible_minions, g_settings.passive_mercenary, g_settings.passive_minions,
-       g_settings.permanent_revives, g_settings.cannot_be_frozen, g_settings.cannot_be_poisoned,
+       g_settings.permanent_revives, g_settings.no_enemy_immunities, g_settings.no_enemy_affixes,
+       g_settings.cannot_be_frozen, g_settings.cannot_be_poisoned,
        g_settings.cannot_be_cursed, g_settings.infinite_town_portal, g_settings.infinite_identify,
        g_settings.auto_identify, g_settings.infinite_potions, g_settings.infinite_keys, g_settings.infinite_gold,
        g_settings.infinite_imbue, g_settings.infinite_sockets, g_settings.infinite_personalize,
@@ -355,6 +357,7 @@ void start_pump() {
   curses::set_services(ctx, g_tables);
   hometown::set_services(ctx, g_tables);
   revive::set_services(ctx, g_tables);
+  enemies::set_services(ctx, g_tables);
   if (ctx->QueryService(&g_strings) != D2RL::ServiceQueryResult::Success ||
       !D2RL::HasLocalizationServiceField(g_strings, D2RL::LocalizationServiceRequiredSize) || !g_strings->getStringById)
     g_strings = nullptr;
@@ -731,6 +734,8 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
                                      {"passivemerc", cheats::kPassiveMerc},
                                      {"passiveminions", cheats::kPassivePets},
                                      {"revives", cheats::kPermanentRevives},
+                                     {"noimmunities", cheats::kNoImmunities},
+                                     {"noaffixes", cheats::kNoAffixes},
                                      {"unfreezable", cheats::kCannotBeFrozen},
                                      {"unpoisonable", cheats::kCannotBePoisoned},
                                      {"uncursable", cheats::kCannotBeCursed}, {"gold", cheats::kInfiniteGold},
@@ -1022,6 +1027,20 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
     say(line);
   }
   {
+    // Enemies without immunities or affixes: the switches, why each cannot work, and what they did this session.
+    const enemies::Stats es = enemies::stats();
+    const char* why_i = cheats::why_not(cheats::kNoImmunities);
+    const char* why_a = cheats::why_not(cheats::kNoAffixes);
+    std::snprintf(line, sizeof(line),
+                  "enemies: noimmunities=%d%s%s noaffixes=%d%s%s; %u hits went through an immunity (%u monsters' "
+                  "immunities off the hover), %u monsters rolled no affix, %u affixes taken out or not added (%u "
+                  "monsters kept mod 13 so the client still sees what they are)",
+                  cheats::enabled(cheats::kNoImmunities), why_i ? " - " : "", why_i ? why_i : "",
+                  cheats::enabled(cheats::kNoAffixes), why_a ? " - " : "", why_a ? why_a : "", es.immunities,
+                  es.shown, es.refused, es.affixes, es.placeholders);
+    say(line);
+  }
+  {
     // Ignore item requirements: the two switches, why each cannot work, and what they did this session.
     const requirements::Stats qs = requirements::stats();
     const char* why = cheats::why_not(cheats::kIgnoreRequirements);
@@ -1105,6 +1124,7 @@ D2RL::ConsoleCommandResult __cdecl on_console(D2R::Game::Client*, const D2RL::Co
       "elites on|off | "
       "perfect on|off | superior on|off | eth on|off | sockets on|off | affixes on|off | best on|off | "
       "merc on|off | minions on|off | passivemerc on|off | passiveminions on|off | revives on|off | "
+      "noimmunities on|off | noaffixes on|off | "
       "unfreezable on|off | "
       "unpoisonable on|off | uncursable on|off | tp on|off | id on|off | autoid on|off | potions on|off | "
       "keys on|off | "

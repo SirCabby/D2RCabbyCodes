@@ -247,6 +247,24 @@ enum Id : int {
   // Named enemies on the map: the client names a monster in the handler its naming mods run (read, never called).
   kMonsterNaming,        // (unit, mod, unique) : a Herald's, a super unique's, a champion's or a random unique's name,
                          // as string ids into the client's monster data
+  // Remove enemy immunities (server thread). A hit's resistance step, once per damage type, reads the defender's
+  // resistance and hands it to one routine before the attacker's pierce, the cap and the damage taken off.
+  kResistComponent,      // (context, damage type, u8 the damage left at its end) -> the damage after resistance: the
+                         // game's own (D2RCore's wrapper calls it first). Read only: its first call is the one below
+  kResistAdjust,         // (context, damage type, the defender's resistance) -> the resistance the hit goes by, the
+                         // pierce and the cap then taken from it; called only by the routine above (hooked)
+  // Remove enemy affixes (server thread). Every mod a monster gets goes through one routine (34 callers in the exe and
+  // D2RCore's Herald code); a minion copies its boss's mods instead and runs their makers.
+  kMonsterModAdd,        // (game, monster, mod, u8 counted as unique): the mod into the first free of the monster's 9,
+                         // then its maker (hooked)
+  kMonsterModTest,       // (monster, MonUMod row, u8 expansion) -> nonzero when the monster may take the mod: what the
+                         // rollers ask of every candidate (D2RCore's, the game's own, a terror zone's extra mod; hooked)
+  kMonsterModsRun,       // (monster): each of the monster's mods' makers run, by every maker that writes the 9 mods
+                         // itself (packs, super uniques, champions, D2RCore's Heralds; hooked)
+  kClientModLoop,        // client, UI thread: (monster): the client's handlers of a monster's base mods and of its own
+                         // (naming, light, the resistance affixes), nothing for an empty list; run at the end of the
+                         // client's monster init, at its class change and at packet 0x57, after its resistances are
+                         // set (hooked: no enemy immunities on the hover)
   kCount
 };
 
@@ -558,6 +576,12 @@ struct RequirementFacts {
 };
 const RequirementFacts& requirement_facts();
 // Experience at a kill's full worth, read from the kill's experience routine (not known: nothing is taken for granted).
+// A hit's resistance step hands the defender's resistance to the hooked routine first, its answer to the pierce.
+bool resist_adjust_checked();
+// Where a monster keeps its 9 mods, from the getter the routine that runs their makers asks first (0: not derived).
+int monster_mods_at();  // in the monster's data (unit +0x10)
+uintptr_t monster_mod_makers();  // the server's maker table, a pointer a mod (0: not derived)
+uintptr_t client_mod_handlers();  // the client's handler table of the mods, a pointer a mod (0: not derived)
 bool kill_experience_checked();  // it asks the level penalty with its third and fourth arguments (the receiver's level,
                                  // then the monster's), the penalty gives two equal levels the whole amount, and both
                                  // of its calls of the ratio getter are the hooked one

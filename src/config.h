@@ -52,6 +52,8 @@ struct Settings {
   bool passive_mercenary = false;    // the mercenary fights nothing (it follows you)
   bool passive_minions = false;      // ... nor do your summons
   bool permanent_revives = false;    // your revives stay until they die (their time never runs out)
+  bool no_enemy_immunities = false;  // an enemy's immunity counts as no resistance (every element hurts it)
+  bool no_enemy_affixes = false;     // monsters get none of the affixes the game rolls for uniques
   bool cannot_be_frozen = false;     // hits never freeze or chill you
   bool cannot_be_poisoned = false;   // hits never poison you, and a poison already on you ends
   bool cannot_be_cursed = false;     // a monster's curse is never put on you, and a curse already on you ends

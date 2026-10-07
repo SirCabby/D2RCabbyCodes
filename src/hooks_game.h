@@ -62,6 +62,12 @@
 //   kept target                   ... nor is there a target kept on the monster (the Warlock demons' own, one a
 //                                 summoning skill set)
 //   killself timer                permanent revives: a revive's end is not run (revive.cpp)
+//   resistance of a hit           no enemy immunities: a monster's immunity counts as no resistance (enemies.cpp)
+//   client's mod loop             ... and the hover lists none: the client's copy of an enemy's immunities lowered
+//                                 after its mod loop (UI thread)
+//   monster mod add / test / mods run  no enemy affixes: a monster that is not yours gets none of the unique affixes:
+//                                 not added, refused to the rollers (D2RCore's too), taken out of what a maker wrote in
+//                                 before the makers run (enemies.cpp)
 //   item requirement test         ignore item requirements (any thread: the client's, the server's, D2RCore's): for
 //                                 the local player, or its mercenary, level, strength and dexterity count as met; the
 //                                 tick has the game work the unit's items out again when a switch changes

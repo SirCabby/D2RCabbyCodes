@@ -579,6 +579,17 @@ void draw_panel() {
               "The monsters your Necromancer revives stay until they die: their 3 minutes never run out. The limit "
               "of revives (one a skill level) is still the game's: past it, a new revive takes the oldest one's "
               "place. Switched off, new revives time out again; the ones already kept stay until they die.");
+    cheat_row(cheats::kNoImmunities, "No enemy immunities",
+              "An enemy's immunity counts as no resistance at all: an element it would be immune to hurts it "
+              "fully, chills, freezes and poisons it, and your -enemy resistance applies to it as on any monster. "
+              "Resistances below 100 stay the game's. The hover bar lists no immunities either, for the monsters "
+              "that come into view from then on.");
+    cheat_row(cheats::kNoAffixes, "No enemy affixes",
+              "Monsters made from now on get none of the affixes the game rolls for unique monsters (Extra Strong, "
+              "Extra Fast, Cursed, Magic Resistant, Fire, Lightning and Cold Enchanted, Mana Burn, Teleportation, "
+              "Spectral Hit, Stone Skin, Multiple Shots, Aura Enchanted), super uniques' and their minions' "
+              "included. A champion keeps its type (Ghostly, Fanatic, Possessed, Berserker), a unique its name, "
+              "extra life and level. Monsters already made keep theirs: a new area, or a new game, has none.");
     cheat_row(cheats::kCannotBeFrozen, "Cannot be frozen",
               "Hits never freeze or chill you (cold damage itself still hurts).");
     cheat_row(cheats::kCannotBePoisoned, "Cannot be poisoned",

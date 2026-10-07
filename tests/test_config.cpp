@@ -65,6 +65,7 @@ int main() {
   CHECK(!s.infinite_cube_ingredients && !s.auto_identify);
   CHECK(!s.ignore_requirements && !s.ignore_requirements_mercenary);
   CHECK(!s.passive_mercenary && !s.passive_minions && !s.permanent_revives);
+  CHECK(!s.no_enemy_immunities && !s.no_enemy_affixes);
   CHECK(!s.map_named_enemies && !s.map_landmarks && !s.map_exit_names);
   CHECK(!s.logging && !s.trace);  // the log is written only when the file says so,
   CHECK(s.log_level == d2rcc::LogLevel::kInfo);  // ... and then all of it
@@ -74,7 +75,7 @@ int main() {
   if (std::ifstream f{"res/cabbycodes.toml", std::ios::binary}) {
     const std::string shipped((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     Settings installed;
-    CHECK(parse(shipped, &installed) == 64);
+    CHECK(parse(shipped, &installed) == 66);
     CHECK(rewrite(shipped, Settings{}) == shipped);
     CHECK(!installed.logging && installed.log_level == d2rcc::LogLevel::kInfo && !installed.trace);
   } else {
@@ -103,6 +104,7 @@ int main() {
   s.invincible_mercenary = true;
   s.passive_minions = true;
   s.permanent_revives = true;
+  s.no_enemy_affixes = true;
   s.cannot_be_poisoned = true;
   s.cannot_be_cursed = true;
   s.infinite_potions = true;
@@ -150,6 +152,7 @@ int main() {
                   "best_affixes = true\r\ndamage_multiplier = 7.5\r\n"
                   "invincible_mercenary = true\r\ninvincible_minions = false\r\n"
                   "passive_mercenary = false\r\npassive_minions = true\r\npermanent_revives = true\r\n"
+                  "no_enemy_immunities = false\r\nno_enemy_affixes = true\r\n"
                   "cannot_be_frozen = false\r\n") != std::string::npos);
   CHECK(text.find("cannot_be_frozen = false\r\ncannot_be_poisoned = true\r\ncannot_be_cursed = true\r\n"
                   "infinite_town_portal = false\r\ninfinite_identify = false\r\nauto_identify = true\r\n"
@@ -164,7 +167,7 @@ int main() {
                   "logging = false\r\nlog_level = \"warning\"\r\n\r\n[d2rl]") != std::string::npos);
 
   Settings back;
-  CHECK(parse(text, &back) == 64);
+  CHECK(parse(text, &back) == 66);
   CHECK(back.cannot_be_cursed && back.infinite_gold && back.home_town == 5);
   CHECK(!back.infinite_imbue && back.infinite_sockets && back.infinite_personalize);
   CHECK(back.infinite_cube_ingredients);
@@ -179,6 +182,7 @@ int main() {
   CHECK(back.extra_drops_elites_only && back.all_socketed && back.max_affixes && back.best_affixes);
   CHECK(back.damage_multiplier == 7.5f && back.invincible_mercenary && !back.invincible_minions);
   CHECK(!back.passive_mercenary && back.passive_minions && back.permanent_revives);
+  CHECK(!back.no_enemy_immunities && back.no_enemy_affixes);
   CHECK(!back.cannot_be_frozen && back.cannot_be_poisoned);
   CHECK(!back.infinite_town_portal && !back.infinite_identify && back.infinite_potions && back.auto_identify);
   CHECK(back.infinite_keys && back.no_durability_loss && back.reveal_map && back.item_level);
@@ -194,7 +198,7 @@ int main() {
   CHECK(filled.find("toggle_key = \"INSERT\"\nlogging = false\nlog_level = \"warning\"\ntrace = false\n") !=
         std::string::npos);
   Settings s3;
-  CHECK(parse(filled, &s3) == 64);
+  CHECK(parse(filled, &s3) == 66);
   CHECK(s3.cannot_be_cursed && s3.infinite_gold && s3.home_town == 5);
   CHECK(!s3.infinite_imbue && s3.infinite_sockets && s3.infinite_personalize);
   CHECK(s3.infinite_cube_ingredients && s3.auto_identify);
@@ -256,6 +260,8 @@ int main() {
   CHECK(parse("[cabbycodes]\npassive_minions = yes\n", &s7) == 0 && !s7.passive_minions);  // no bool: the default
   CHECK(parse("[cabbycodes]\npermanent_revives = true\n", &s7) == 1 && s7.permanent_revives);
   CHECK(parse("[cabbycodes]\npermanent_revives = 1\n", &s7) == 0 && !s7.permanent_revives);  // no bool: the default
+  CHECK(parse("[cabbycodes]\nno_enemy_immunities = true\nno_enemy_affixes = true\n", &s7) == 2 &&
+        s7.no_enemy_immunities && s7.no_enemy_affixes);
   Settings s6;
   CHECK(parse("[cabbycodes]\ndamage_multiplier = 999\n", &s6) == 1 && s6.damage_multiplier == 100.0f);
   CHECK(parse("[cabbycodes]\ndamage_multiplier = 0.25\n", &s6) == 1 && s6.damage_multiplier == 1.0f);

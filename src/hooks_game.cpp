@@ -23,6 +23,7 @@
 #include "consumables.h"
 #include "cube.h"
 #include "curses.h"
+#include "enemies.h"
 #include "itemlevel.h"
 #include "itemseed.h"
 #include "loot.h"
@@ -168,6 +169,12 @@ passive::KeptTargetFn g_orig_kept_target = nullptr;
 revive::TimerFn g_orig_killself = nullptr;
 // Ignore item requirements: the game's requirement test (requirements.h).
 requirements::TestFn g_orig_requirements = nullptr;
+// Enemies without immunities or affixes: a hit's resistance routine and a monster's mod add (enemies.h).
+enemies::AdjustFn g_orig_resist_adjust = nullptr;
+enemies::ModAddFn g_orig_mod_add = nullptr;
+enemies::ModTestFn g_orig_mod_test = nullptr;
+enemies::ModsRunFn g_orig_mods_run = nullptr;
+enemies::ClientModsFn g_orig_client_mods = nullptr;
 // Named enemies on the map: the automap's draw of one unit (mapmarks.h).
 AutomapUnitFn g_orig_automap_unit = nullptr;
 volatile LONG g_pay_seen = 0;          // the first payments not taken are logged
@@ -1008,6 +1015,32 @@ void __fastcall hk_killself_timer(void* game, Unit* monster, int32_t mod, int32_
   revive::timer(g_orig_killself, game, monster, mod, unique);
 }
 
+// A hit's resistance for one damage type, as the defender's resistance becomes what the hit goes by: an immunity of a
+// monster that is not yours counts as none under the switch (enemies.cpp); the game's answer otherwise.
+int32_t __fastcall hk_resist_adjust(void* context, void* damage_type, int32_t resistance) noexcept {
+  return enemies::adjust(g_orig_resist_adjust, context, damage_type, resistance);
+}
+
+// A mod added to a monster: an affix the game rolls for uniques is left out for a monster that is not yours under
+// the switch (enemies.cpp); any other mod, and any other monster's, is the game's.
+void __fastcall hk_mod_add(void* game, Unit* monster, int32_t mod, int32_t unique) noexcept {
+  enemies::mod_add(g_orig_mod_add, game, monster, mod, unique);
+}
+
+// Whether a monster may take a mod (asked by every roller of affixes, D2RCore's among them): no for an affix on a
+// monster that is not yours under the switch (enemies.cpp).
+int32_t __fastcall hk_mod_test(Unit* monster, const uint8_t* row, int32_t expansion) noexcept {
+  return enemies::mod_test(g_orig_mod_test, monster, row, expansion);
+}
+
+// A monster's mods' makers run: the affixes a maker wrote in itself (a super unique's own) are taken out of the list of
+// a monster that is not yours first (enemies.cpp).
+void __fastcall hk_mods_run(Unit* monster) noexcept { enemies::mods_run(g_orig_mods_run, monster); }
+
+// Client, UI thread: a monster's mods' handlers have run, its resistances are the client's from then on; an immunity of
+// a monster that is not yours is taken off the client's copy under the switch (the hover lists none: enemies.cpp).
+void __fastcall hk_client_mods(Unit* monster) noexcept { enemies::client_mods_run(g_orig_client_mods, monster); }
+
 // The requirement test (any thread: the client's and the server's, and D2RCore's): for the local player, or its
 // mercenary, under its switch, level, strength and dexterity count as met (requirements.cpp); for anyone else, and
 // with both switches off, the game's own answer.
@@ -1433,6 +1466,19 @@ bool install() {
   const char* revive_why = revive::bind();
   const bool killself =
       !revive_why && install_one(sites::kKillSelfTimer, &hk_killself_timer, &g_orig_killself, "killself timer");
+  // Enemies without immunities or affixes: a hit's resistance routine and a monster's mod add.
+  const char* immunities_why = enemies::bind_immunities();
+  const bool resist_adjust =
+      !immunities_why && install_one(sites::kResistAdjust, &hk_resist_adjust, &g_orig_resist_adjust,
+                                     "resistance of a hit");
+  // ... and the hover's: the client's mod loop, after which the client's copy of an enemy's immunities is lowered.
+  if (!immunities_why && resist_adjust && !enemies::bind_display())
+    install_one(sites::kClientModLoop, &hk_client_mods, &g_orig_client_mods, "client's mod loop");
+  const char* affixes_why = enemies::bind_affixes();
+  const bool mod_add =
+      !affixes_why && install_one(sites::kMonsterModAdd, &hk_mod_add, &g_orig_mod_add, "monster mod add") &&
+      install_one(sites::kMonsterModTest, &hk_mod_test, &g_orig_mod_test, "monster mod test") &&
+      install_one(sites::kMonsterModsRun, &hk_mods_run, &g_orig_mods_run, "monster mods run");
   // Ignore item requirements: the requirement test, which answers as the game does while both switches are off.
   requirements::bind();
   const bool requirement_test =
@@ -1498,6 +1544,12 @@ bool install() {
                                                  : !killself             ? "revive timer not hooked"
                                                  : !revive::has_tables() ? "the game's skill table is unavailable"
                                                                          : nullptr);
+  cheats::set_why_not(cheats::kNoImmunities, immunities_why  ? immunities_why
+                                             : !resist_adjust ? "the resistance routine not hooked"
+                                                              : nullptr);
+  cheats::set_why_not(cheats::kNoAffixes, affixes_why ? affixes_why
+                                          : !mod_add  ? "the monster mod routines not hooked"
+                                                      : nullptr);
   cheats::set_why_not(cheats::kIgnoreRequirements, requirements::why_not_player() ? requirements::why_not_player()
                                                    : !requirement_test            ? "requirement test not hooked"
                                                                                   : nullptr);

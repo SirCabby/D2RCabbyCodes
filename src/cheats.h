@@ -39,6 +39,8 @@ enum Kind : int {
   kPassiveMerc,         // the mercenary fights nothing: its AI finds no enemy, and it follows you
   kPassivePets,         // ... nor do your summons
   kPermanentRevives,    // your revives stay until they die: the end of their time is never run
+  kNoImmunities,        // an enemy's immunity counts as no resistance: every element hurts it
+  kNoAffixes,           // monsters made from now on get none of the affixes the game rolls for uniques
   kCannotBeFrozen,      // hits never freeze or chill you
   kCannotBePoisoned,    // hits never poison you, and a poison already on you ends
   kCannotBeCursed,      // a monster's curse is never put on you, and a curse already on you ends

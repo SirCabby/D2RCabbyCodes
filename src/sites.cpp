@@ -611,6 +611,52 @@ const Spec kSpecs[kCount] = {
      "45 85 C0 0F 84 ?? ?? ?? ?? 4C 8B DC 55 56 57 49 8D 6B A1 48 81 EC D0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 "
      "45 2F 49 89 5B 10 8B F2 4D 89 63 18 48 8B F9 4D 89 6B 20 48 89 4D AF E8",
      0, 0x1DE620},
+    // A hit's resistance step for one damage type (the context in rcx, the type in rdx: +0x08 its resistance stat):
+    // the damage (the type's first field) nothing when it is not above 0, else the defender's (context +0x18)
+    // resistance read, handed to the routine below, its answer to the pierce, then the defender kind (context +0x24:
+    // a monster's resistance is not capped). The whole stretch to there.
+    {kResistComponent, "damage: a hit's resistance for one damage type",
+     "48 89 6C 24 18 56 41 54 41 55 41 56 41 57 48 83 EC 50 4C 8B 3A 33 ED 45 8B E8 4C 8B F2 48 8B F1 45 8B 27 45 85 "
+     "E4 7F 0A 41 89 2F 33 C0 E9 ?? ?? ?? ?? 8B 52 08 8B C5 48 89 9C 24 80 00 00 00 48 89 BC 24 88 00 00 00 41 8B FC "
+     "83 FA FF 74 0C 48 8B 49 18 45 33 C0 E8 ?? ?? ?? ?? 44 8B C0 49 8B D6 48 8B CE E8 ?? ?? ?? ?? 44 8B C0 49 8B D6 "
+     "48 8B CE E8 ?? ?? ?? ?? 8B D8 39 6E 24",
+     0, 0x4523E0},
+    // The routine it hands the resistance to (r8d, kept in ebp and answered): nothing for a damage type without a
+    // second stat (+0x14), a player defender (`cmp dword [rcx+24h], 0`) or an attacker without that stat; else the
+    // defender's (context +0x18) base resistance asked.
+    {kResistAdjust, "damage: the defender's resistance as a hit takes it",
+     "40 53 55 57 48 81 EC D0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 A0 00 00 00 48 8B FA 44 89 44 24 24 "
+     "8B 52 14 41 8B E8 48 8B D9 83 FA FF 0F 84 ?? ?? ?? ?? 83 79 24 00 0F 84 ?? ?? ?? ?? 48 8B 49 10 45 33 C0 E8 ?? "
+     "?? ?? ?? 89 44 24 28 85 C0 0F 84 ?? ?? ?? ?? 8B 57 08 45 33 C0 48 8B 4B 18",
+     0, 0x44F6D0},
+    // A mod added to a monster: the mod in ebp (`movsxd rbp, r8d`), the monster in rbx; a unit that is no monster
+    // asserts; then the monster's mods (the getter, monster data + 0x20) for the first free slot, and the mod's maker.
+    {kMonsterModAdd, "monster mod: one added to a monster",
+     "48 89 5C 24 18 55 56 41 56 48 83 EC 20 49 63 E8 45 8B F1 48 8B DA 48 8B F1 48 85 D2 74 0D 48 8B CA E8 ?? ?? ?? "
+     "?? 83 F8 01 74 19 48 8D 4C 24 48 C6 44 24 48 00 E8 ?? ?? ?? ?? 84 C0 74 01 CC 48 85 DB 74 71 48 8B CB E8 ?? ?? "
+     "?? ?? 83 F8 01 75 64 48 8B CB 48 89 7C 24 40 E8 ?? ?? ?? ??",
+     0, 0x4995E0},
+    // Whether a monster may take a mod: the MonUMod row in rdx (`cmp byte [rdx+6], 0`: enabled), kept in rbx, the
+    // monster in rsi; a classic row (version +4 below 100) only with the third argument; then the monster's bank.
+    {kMonsterModTest, "monster mod: may a monster take it",
+     "48 89 5C 24 08 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 40 80 7A 06 00 48 8B DA 48 8B F1 0F 84 "
+     "?? ?? ?? ?? 45 85 C0 75 0B 66 83 7A 04 64 0F 83 ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B6 F8",
+     0, 0x4A1E50},
+    // A monster's mods' makers run: the monster in rsi, its mods (the getter, the call) in rbp, then each mod (the
+    // byte at rbp + rdi, a 0 ends them) through the maker table (`lea r14`).
+    {kMonsterModsRun, "monster mod: a monster's mods' makers run",
+     "40 55 56 48 83 EC 68 48 8B F1 E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 48 89 9C 24 80 00 00 00 48 89 "
+     "BC 24 88 00 00 00 33 FF 4C 89 A4 24 90 00 00 00 4C 8D 25 ?? ?? ?? ?? 4C 89 B4 24 98 00 00 00 4C 8D 35 ?? ?? ?? "
+     "?? 4C 89 7C 24 60 4C 8D 3D ?? ?? ?? ?? 0F B6 1C 2F",
+     0, 0x49E860},
+    // The client's mod loop: the monster in rsi, its mods (the getter) in rbp, nothing for an empty list (`cmp byte
+    // [rax], 0`); the unique flag (the kind test with 8) to each handler, the four base mods (`lea rbx`, `mov edi, 4`)
+    // and then the monster's through the client's handler table (`lea r15`).
+    {kClientModLoop, "client: a monster's mods' handlers run",
+     "40 55 56 48 83 EC 28 48 8B F1 E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 80 38 00 0F 84 ?? ?? ?? ?? 48 89 "
+     "5C 24 40 BA 08 00 00 00 48 89 7C 24 48 48 8B CE 4C 89 74 24 50 4C 89 7C 24 20 E8 ?? ?? ?? ?? 44 0F B6 F0 48 8D "
+     "1D ?? ?? ?? ?? BF 04 00 00 00 4C 8D 3D ?? ?? ?? ??",
+     0, 0x1DF980},
 };
 
 Result g_results[kCount];
@@ -636,6 +682,10 @@ MapFacts g_map;
 FillFacts g_fill;
 RequirementFacts g_requirement;
 bool g_kill_exp_checked = false;
+bool g_resist_checked = false;
+int g_mods_at = 0;
+uintptr_t g_mod_makers = 0;
+uintptr_t g_client_mods = 0;
 NameFacts g_names;
 
 // The bytes of an instruction's RIP-relative operand, as an absolute address.
@@ -714,6 +764,10 @@ const MapFacts& map_facts() { return g_map; }
 const FillFacts& fill_facts() { return g_fill; }
 const RequirementFacts& requirement_facts() { return g_requirement; }
 bool kill_experience_checked() { return g_kill_exp_checked; }
+bool resist_adjust_checked() { return g_resist_checked; }
+int monster_mods_at() { return g_mods_at; }
+uintptr_t monster_mod_makers() { return g_mod_makers; }
+uintptr_t client_mod_handlers() { return g_client_mods; }
 const NameFacts& name_facts() { return g_names; }
 uintptr_t call_target(Id id) { return call_at(address(id)); }
 
@@ -2157,6 +2211,34 @@ void derive() {
                "scales what the game gives, after its reductions",
                !penalty ? "its level penalty" : !same_levels ? "the penalty's table" : "its calls of the ratio");
   }
+  // Remove enemy immunities. The resistance step's first call, right after it reads the defender's resistance (its
+  // signature: the read, then the call with it in r8d), must be the routine hooked, whose answer goes on to the pierce.
+  g_resist_checked = false;
+  if (const uintptr_t component = address(kResistComponent)) {
+    const uintptr_t adjust = address(kResistAdjust);
+    g_resist_checked = adjust && call_at(component + 0x64) == adjust;
+    if (!g_resist_checked)
+      log_warn("sites: a hit's resistance step does not hand the defender's resistance to the routine found - enemy "
+               "immunities stay");
+  }
+  // Remove enemy affixes. The routine that runs a monster's mods' makers asks the mods' getter first (the call at +0xA):
+  // a monster (`cmp eax, 1`) with its data (+0x10), the mods that far into it (`add rax, imm8`). Its maker table, a
+  // pointer a mod, is the `lea r14` of its signature (+0x44).
+  g_mods_at = 0;
+  g_mod_makers = 0;
+  if (const uintptr_t run = address(kMonsterModsRun)) {
+    g_mod_makers = rip_operand(run + 0x44, 3, 7);
+    const uintptr_t getter = call_at(run + 0xA);
+    const uintptr_t data = getter ? find_in(getter, 0x60, "83 F8 01 75 ?? 48 8B 43 10 48 85 C0 74 ?? 48 83 C0") : 0;
+    uint8_t at = 0;
+    if (data && mem::read_safe(data + 17, &at) && at) g_mods_at = at;
+    else
+      log_warn("sites: a monster's mods are not read the way expected - monsters keep the affixes the game writes in "
+               "itself (a super unique's own)");
+  }
+  // The client's mod loop: its handler table is the `lea r15` of its signature (+0x55).
+  g_client_mods = 0;
+  if (const uintptr_t loop = address(kClientModLoop)) g_client_mods = rip_operand(loop + 0x55, 3, 7);
   // The client's names of monsters (its naming handler, run for a monster's naming mods). A Herald (its kind 0x200):
   // the string of "HeraldName" and the stat it asks, else "HeraldName1". A super unique (kind 2): its row's string
   // (+0x02), a default when it has none. A champion (kind 4, 0x1A5C10): the champion format with the string its table
@@ -2411,6 +2493,12 @@ void derive() {
   logf("sites: %-28s %s", "enemy test",
        g_enemy_checked ? "its two entry stubs jump to it, and the AI's own two enemy checks end in a jump to the first"
                        : "not checked");
+  logf("sites: %-28s %sa monster's 9 mods at its data +0x%X; their makers a pointer a mod at 0x%llX; the client's handlers at "
+       "0x%llX", "enemy affixes",
+       g_mods_at ? "" : "not derived ", g_mods_at, rva_of(g_mod_makers), rva_of(g_client_mods));
+  logf("sites: %-28s %s", "enemy immunities",
+       g_resist_checked ? "a hit's resistance step hands the defender's resistance to the hooked routine first"
+                        : "not checked");
   logf("sites: %-28s %sthe killself timer kills a player's pet with the pet removal 0x%llX, which asks the pet "
        "lookup first",
        "permanent revives", g_revive.known ? "" : "not derived ", rva_of(g_revive.pet_removal));

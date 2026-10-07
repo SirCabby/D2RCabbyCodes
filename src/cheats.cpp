@@ -35,7 +35,8 @@ const char* const kNames[kCount] = {"God mode",        "Infinite mana",   "Infin
                                     "All superior",         "All ethereal",    "All socketed", "Max affixes",
                                     "Best affixes",         "Damage multiplier",
                                     "Invincible mercenary", "Invincible minions", "Passive mercenary",
-                                    "Passive minions",      "Permanent revives",    "Cannot be frozen",
+                                    "Passive minions",      "Permanent revives",    "No enemy immunities",
+                                    "No enemy affixes",     "Cannot be frozen",
                                     "Cannot be poisoned",   "Cannot be cursed", "Infinite town portal",
                                     "Infinite identify",    "Identify on pickup",
                                     "Infinite potions",     "Infinite keys",   "No durability loss",
@@ -85,6 +86,8 @@ void init(const config::Settings& s) {
   InterlockedExchange(&g_on[kPassiveMerc], s.passive_mercenary ? 1 : 0);
   InterlockedExchange(&g_on[kPassivePets], s.passive_minions ? 1 : 0);
   InterlockedExchange(&g_on[kPermanentRevives], s.permanent_revives ? 1 : 0);
+  InterlockedExchange(&g_on[kNoImmunities], s.no_enemy_immunities ? 1 : 0);
+  InterlockedExchange(&g_on[kNoAffixes], s.no_enemy_affixes ? 1 : 0);
   InterlockedExchange(&g_on[kCannotBeFrozen], s.cannot_be_frozen ? 1 : 0);
   InterlockedExchange(&g_on[kCannotBePoisoned], s.cannot_be_poisoned ? 1 : 0);
   InterlockedExchange(&g_on[kCannotBeCursed], s.cannot_be_cursed ? 1 : 0);
@@ -250,6 +253,8 @@ void to_settings(config::Settings* s) {
   s->passive_mercenary = g_on[kPassiveMerc] != 0;
   s->passive_minions = g_on[kPassivePets] != 0;
   s->permanent_revives = g_on[kPermanentRevives] != 0;
+  s->no_enemy_immunities = g_on[kNoImmunities] != 0;
+  s->no_enemy_affixes = g_on[kNoAffixes] != 0;
   s->cannot_be_frozen = g_on[kCannotBeFrozen] != 0;
   s->cannot_be_poisoned = g_on[kCannotBePoisoned] != 0;
   s->cannot_be_cursed = g_on[kCannotBeCursed] != 0;

@@ -168,7 +168,28 @@ loader is the injection point every runtime mod uses).
   built yet, filled by the game's own pass) for every area but a town, then reads of the server's monsters in those
   rooms on the server thread (their kind, class, place, name seed, mods, super unique row, a Herald's tier stat through
   the stat helpers); their names worked out from the game's tables and strings as the client's naming handler works
-  them out. No hook, nothing written, no routine called but the room build already approved.
+  them out. No hook, nothing written, no routine called but the room build already approved. Approved 2026-10-06 for
+  enemies without immunities and without affixes (asked as "add a new cheat to remove enemy immunities, and another
+  one to remove all enemy affixes"; Joshua chose an immunity counted as 0 % over 99 % or 75 %, and the champion types
+  kept), both on the server thread: one hook, the routine a hit's resistance step hands the defender's resistance to
+  first (0x44F6D0; its one caller the step, 0x4523E0, which D2RCore's wrapper calls first), whose answer for a monster
+  that is not yours is at most 0 when the resistance (or the monster's base) is 100 or more, its own original called
+  and the base read through the stat helpers; and one hook, the mod add (0x4995E0; 34 callers and D2RCore's Herald
+  code), which for a monster that is not yours does not run its original for an affix: a MonUMod row with a unique
+  pick weight (read through the loader). Nothing else is called, nothing written. Approved the same day, after the
+  affixes stayed ("the affixes are still on the enemies in the hover bar": the rollers write a unique's affixes into
+  its list themselves, never through the add; Joshua chose both hooks offered): one hook, the test every roller asks of
+  a candidate mod (0x4A1E50: the game's roller of a random unique's, a super unique's extra ones, a Herald's through
+  D2RCore and D2RCore's own Herald modifiers, a terror zone's extra mod), answered no for an affix on a monster that is
+  not yours; and one hook, the routine every maker that writes a monster's nine mods itself calls to run their makers
+  (0x49E860), which first takes the affixes out of that monster's list (the one write: its own list, the others kept
+  in order; and, reported the same day as "some uniques were just removed. The map cheat shows them there but I
+  didn't see them appear", a list left empty keeps mod 13, which does nothing: the game tells the client a monster's
+  kind only when its list has a mod, and the client names a unique only then). Approved the same day for the hover
+  ("I'm still seeing immunities listed"): one hook on the client (UI thread), its mod loop (0x1DF980, run at the end of
+  its monster init, at its class change and at packet 0x57, after it has set a monster's resistances), after which an
+  immunity of a monster that is not yours is 0 in the client's copy (the one write: those six stats of the client's
+  copy, which the server never reads).
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -218,7 +239,9 @@ src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, 
                       stat test (god mode), the item notice (identify on pickup), the AI dispatcher, the enemy test
                       and the kept target's getter (passive pets), the killself timer (permanent revives), the
                       automap's draw of one unit (named enemies on the map), the requirement test (ignore item
-                      requirements); the item writer patch, the rare step's picker calls
+                      requirements), a hit's resistance and the client's mod loop (no enemy immunities), a monster's
+                      mod add, the rollers' mod test and the run of a monster's mods' makers (no enemy affixes); the
+                      item writer patch, the rare step's picker calls
 src/cheats.*          switches (atomics), Status snapshot, why-not reasons for the panel
 src/movespeed.h       movement speed: the bonus in the player's base velocitypercent, put on top of the game's own
                       again wherever the base is not what the tick wrote (each game's character starts at 100, with
@@ -280,6 +303,12 @@ src/revive.*          permanent revives: the killself monster mod's timer not ru
                       (the hook on the timer, server thread), which pets by the game's own pet lookup; Revive's pet
                       type read from its Skills row (game thread, the tick); the rule is in the header
                       (tests/test_revive.cpp)
+src/enemies.*         enemies without immunities or affixes: an immunity of a monster not yours counted as none (the
+                      hook on the routine a hit's resistance step hands the defender's resistance to) and taken off the
+                      client's copy for the hover (the hook on the client's mod loop, UI thread), the affixes the game
+                      rolls for uniques left out of a monster's mods (refused to the rollers, taken out of what a maker
+                      wrote in before the makers run, mod 13 kept in a list left empty, not added; which mods from the
+                      MonUMod rows, read on the server thread); the rules are in the header (tests/test_enemies.cpp)
 src/requirements.*    ignore item requirements: the requirement test's hook (any thread) takes level, strength and
                       dexterity as met for the local player, or its mercenary, and asks the routine's later tests
                       again (the game's data tables read, the restricted-socket test called); a switch changed in a
@@ -620,7 +649,16 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | kept target | 0x544A00 / 0x544A60 / 0x5459A0 / 0x5449A0 | a monster's kept target: monster data +0x44 its kind, +0x40 its id. The kind's getter (monster) -> u32 (callers 0x598010 and AiPet's 0x5D5A70), the id's 0x544A60, the setter 0x5459A0 (monster, kind, id: only for a monster whose MonStats has switchai, flags +0x3C bit 16, which every pet has but the Valkyrie, the invisible pet and the three vines), the clear 0x5449A0. Set by Attract's step 0x55ABB0 (only on a monster of the monsters' side, 0x559E40) and Confuse's 0x55AC40 (only on an enemy of the caster): never on a pet; by a summoning skill's spawn helper 0x520930 (server do function 155), the init of AI mode 11 (0x5CD2F0) and the Warlock demons' AI (0x5D2170). Hooked (the kind's getter): passive pets |
 | game events | 0x48B720 / 0x48BE80 / 0x48B890 / 0x48CC10 | an event: +0x00 u8 type (0..14), +0x02 flags, +0x04 the frame it is for, +0x08 its unit, +0x18 / +0x1C / +0x20 three parameters, +0x28 .. +0x38 list links, +0x48 a callback or 0. The add 0x48B720 (game, unit, type, frame, p1, p2, p3; no callback) goes to 0x48BE80 (game, unit, type, frame, callback, p1, p2, p3): a frame not after the game's (+0x170) is made the next one. 0x48B890 (game, unit, type, 0) walks the unit's events (0x48FE50) for that type: Revive calls it before it puts the AI's think event again. 0x48CC10 (game, event) frees one. Read |
 | monster events | 0x48C790 / 0x447420 / 0x1D1A7A0 | the events are run by an executor of the unit's type (five of them, 0x48C4D0 .. 0x48CA80, each with its own handler); the monsters' 0x48C790 hands each event of the frame to its callback, else to 0x447420 (game, monster, type, p1, p2, p3; it asserts a monster), then frees it (0x48CC10). 0x447420: nothing while the byte 0x2AAEA9C is set; types 6, 7, 10 and 11 are skipped while the monster is frozen (state 1) and not dead, and the event is freed all the same (a revive frozen as its time ends stays: the game's own); type 2 (the AI's think) is put off 25 frames when 0x446E40 says so (asked with 0x4A3010's answer); else the table 0x1D1A7A0 by type: 0 0x446EB0, 1 0x446FA0, 2 0x4A2A00 (the AI dispatcher), 3 0x448C00, 5 0x435520, 6 0x4485F0, 7 0x498EB0 (a monster mod's event), 8 0x437460, 9 0x437230, 10 0x447E30, 12 0x42EA80. Read |
-| monster mods | 0x4995E0 / 0x2395FE0 / 0x498EB0 / 0x49D240 / 0x2396210 | a mod added (game, monster, mod, flag): into the first free of the monster's 9 (0x38E310), then the mod's maker (table 0x2395FE0, a pointer a mod; MonUMod 21 has none). A mod's event, type 7 with the mod its first parameter: 0x498EB0 -> 0x49D240 (game, monster, 0, kind 2, mod, p2), which runs the mod's routine of that kind when the monster has the mod: records 0x30 bytes a mod at 0x2396210, six routines by kind (0 none; kind 2 the timer at +0x10, kind 5 at +0x28 handed the third argument). MonUMod 21 is killself (monumod.txt): its record has only the timer 0x4A1D20, the one pointer to it in the image (0x2396610); D2RCore names none of these. Read |
+| monster mods | 0x4995E0 / 0x2395FE0 / 0x498EB0 / 0x49D240 / 0x2396210 | a mod added (game, monster, mod, flag): into the first free of the monster's 9 (0x38E310), then the mod's maker (table 0x2395FE0, a pointer a mod; MonUMod 21 has none). A mod's event, type 7 with the mod its first parameter: 0x498EB0 -> 0x49D240 (game, monster, 0, kind 2, mod, p2), which runs the mod's routine of that kind when the monster has the mod: records 0x30 bytes a mod at 0x2396210, six routines by kind (0 none; kind 2 the timer at +0x10, kind 5 at +0x28 handed the third argument). MonUMod 21 is killself (monumod.txt): its record has only the timer 0x4A1D20, the one pointer to it in the image (0x2396610); D2RCore names none of these. The add has 34 callers: the unique pack maker 0x494A60 (the rolled affixes), the super unique maker 0x4947D0 (SuperUniques Mod1..3), Revive (21 killself; 15 partydead in its helpers), Decoy, the shadows, Reanimate As, the hireling (19), the summons' sumumod (0x56D770: 32, 33, 42), MonStats2 SpawnUniqueMod (0x543120: hidedead), and D2RCore through its routine table (.data 0x707FC8: its Herald code). A minion (0x499210) copies its boss's nine mods and runs their makers without it. MonUMod rows (the loader's TableId::MonUMod, 32 bytes): +0x00 the id, +0x04 version, +0x06 enabled, +0x07 xfer, +0x08 champion, +0x09 fPick, +0x0A / +0x0C exclude1 / 2, +0x0E cpick x3, +0x14 upick x3 (u16, Normal .. Hell), +0x1C constant. 3.3's mods with a upick: 5 strong, 6 fast, 7 curse, 8 resist (Nightmare and Hell), 9 fire, 17 lightning, 18 cold, 25 manahit, 26 teleport, 27 spectralhit, 28 stoneskin, 29 multishot, 30 aura (24 thief is disabled); with a cpick: 16 champion and 36 .. 39 ghostly, fanatic, possessed, berserk. Most affixes never come through the add: the game's roller writes them into the list (0x49E160 (game, monster, champion chance, min, max, ...): a unique's count (difficulty + 1 from its maker) picked one at a time by 0x49E470, which weighs the MonUMod rows with the difficulty's upick that the test below passes, not on yet, and answers 0 with none, ending the loop; a champion instead its type by cpick, 0x49EF90), the super unique maker writes its row's three (+0x10, `mod 24` skipped) and then the roller's extra ones, one a difficulty, a terrorized monster (0x543120 -> 0x49A7E0) gets its level's terror mod (level runtime +0x9E8, 0x5090A0) when the test passes, and a saved monster is recreated from its record (0x505D70: the room's records from 0x505000; a unique through 0x49AF30 with the record's nine at +0x3A, a minion through 0x499210, which runs the makers itself; then each slot that differs from the record is added again through D2RCore's ordinal 1165, `.maho` 0x3E2B46C). Hooked (the add): no enemy affixes |
+| unique makers | 0x499880 / 0x498810 / 0x49EAD0 | the random unique maker (game, ...): the monster made (0x49E980), the roller (0x49E160) with difficulty + 1 mods, its minions (0x49EAD0, which copy its list as it stands), the base mods' makers (0x49E780) and then its own (0x49E860); callers the preset placer 0x50A050, the fill pass's terror step 0x50ACF0, an object 0x590960, a quest 0x5EC180, console commands. 0x498810 the Herald maker: kind 0x200, the game's Herald tier (game +0x1A5C4), its mods through `.maho` 0x3E2B466 = D2RCore ordinal 1164 (0x40ED80: the game's roller through D2RCore's routine table, then for a configured Herald modifier D2RCore's own roller 0x40C8C0, which asks the test of each MonUMod row with an upick and appends its picks; nothing with no candidate). D2RCore ordinal 1165 (0x40EFB0, "Restoring an enchantment"): a Herald modifier through 0x49E860 alone (the list set to that mod, run, the saved list put back with the mod in its first free slot), any other mod through the add. Read: no enemy affixes |
+| monster packet: special | 0x47C570 / 0x49AAE0 | the monster's add packet (from the unit sent 0x538690): after its mode, a bit for a special monster and then, only when 0x49AAE0 (monster: data +0x20, its first mod, not 0; its one caller) or the mercenary flag says so, the kind bits 4, 8, 2, 0x10, 0x40, 0x200, 0x400, a super unique's row (16 bits), each mod (8 bits) and a 0, the name seed (16), the owner. The client (0x98FA0) takes the kind, the row and the mods only from that section. So a monster with an empty list reaches the client with no kind: no unique name, no gold. Every unique the game makes has a mod (the Ancients and Nihlathak in Normal aside, named by their own class). Read: no enemy affixes (mod 13 kept in a list left empty) |
+| client: a monster's mods | 0x1DF980 / 0x235AE80 / 0x1CDD580 | the client's mod loop (monster): nothing for an empty list; else the unique flag (kind 8) to each handler of the four base mods (0x1CDD570: 1 .. 4) and then of the monster's nine, from the client's table 0x235AE80 (a pointer a mod: 1, 12, 16, 36 .. 39 the naming handler 0x1DE620; 3 a unique's light 0x1DED20, which makes a light each time; 8, 9, 17, 18, 23, 25, 27, 28 the resistance maker 0x38E430; 11 0x1DEF70; 26 0x1DEFD0; the rest none). Three callers: the end of the client's monster init 0x1A3940, its class change 0x1A33B0, the handler of packet 0x57 0x12CE00. An affix's text: the u16 string id at 0x1CDD580 + 2 x mod (the line builder 0x1DFAE0, read by the hover and 0x1DF6B0); only 5 .. 9, 17, 18 and 24 .. 30 have one. Hooked (the loop): no enemy immunities on the hover |
+| monster mod events | 0x2396210 / 0x498EE0 .. 0x499160 | the six routines of a mod's record (0x30 bytes a mod), run by five walkers over a monster's list (0x499020 kind 0, 0x498F80 1, 0x4990C0 3, 0x498EE0 4, 0x499160 5 with a second unit) and 0x49D240 (kind 2, a mod's event): an affix's or a death effect's work at its moment (9 Fire Enchanted 0x4A12B0 / 0x49F650, 21 killself's timer, 10, 15, 20, 22, 31 .. 35, 40, 42, 43 at death and the like). 1, 2, 3, 4, 13 and 16 have none. Read: no enemy affixes (13 has no routine) |
+| client monster resistances | 0x1A3940 / 0x1A33B0 / 0x38E430 | the client's monster init (its one caller the client's monster creation 0x98FA0) and class change set a monster's six resistances (36, 37, 39, 41, 43, 45) from its MonStats row of the difficulty (+0x196 .. +0x1B4, 2 bytes, 3 apart), then run the mod loop. 0x38E430 (monster, mod), on both sides (the server's makers 8, 27, 28; the client's handlers above): the resistances raised in the base (SetUnitStat) by the mod (8 Magic Resistant +40 cold, fire, lightning; 9 / 17 / 18 an Enchanted's +75; 28 Stone Skin's physical and double defense ...), nothing more for a monster with two immunities. The hover (0xCEA50 at 0xCEFB0) lists an immunity for a stat of 100 or more less the local player's sunder stat (0x16E / 0x166 ...). Written (the client's copy): no enemy immunities |
+| monster mod test | 0x4A1E50 | (monster, MonUMod row (32 bytes), u8 expansion) -> nonzero when the monster may take the mod: the row enabled (+6), a classic row (+4 below 100) only with the third argument, its exclusions (+0x0A..) against the monster's type, ... Asked by the game's roller 0x49E470 (via 0x49E160 and the super unique maker), 0x49EF90, the terror mod 0x49A7E0, and D2RCore's roller (routine table .data 0x707F98). Hooked: no enemy affixes (no for an affix on a monster not yours) |
+| monster mods run | 0x49E860 | (monster): the mods' getter (0x38E310: monster data +0x20, 9 bytes), then each mod to its maker (table 0x2395FE0, (monster, mod, 1)) and a deferred task (0x4A5680). Called by every maker that writes the nine itself: 0x49AF30 packs (twice), 0x499BA0 super uniques, 0x49AB40 champions, 0x498810, 0x4996B0, 0x499880, 0x49AC30, 0x49B3D0, and D2RCore (routine table .data 0x707FB0: its Herald code), each after 0x49E780 (the base mods' makers). Hooked: no enemy affixes (the affixes taken out of the list first) |
+| resistance step | 0x4523E0 / D2RCore 0x826720 | (context, damage type, u8 the damage left at the end) -> the damage after resistance, run by CalculateTotalDamage for each of its 12 damage types (`.maho` 0x3E2B496 is D2RCore's ApplyResistanceComponentWithPrimeEvilThreat: the game's routine through its table (.data 0x710570), then a prime evil's threat). Context: +0x00 game, +0x08 the difficulty's data (0x300830), +0x10 attacker, +0x18 defender, +0x20 / +0x24 nonzero when the attacker / defender is a monster and no hireling (0x3AF240), +0x28 the D2Damage. A damage type: +0x00 its field, +0x08 its resistance stat (-1 none), +0x0C its max resistance stat, +0x10 the attacker's pierce stat, +0x14 a second stat (-1 for most). Nothing for a damage of 0 or less; else the defender's resistance (GetUnitStat, the total), 0x44F6D0 with it, then the pierce 0x44F8B0 (resistance - the attacker's pierce, for a monster defender only below 100: an immunity is not pierced), then for a player defender (+0x24 = 0) the difficulty's penalty (not physical, magic) and the cap (75 + the max stat, at most 95; 50 physical), at least -100, then damage x (100 - min(resistance, 100)) / 100. The lengths (burn, poison, chill, freeze) are damage types of their own with their element's resistance. Read |
+| a hit's resistance taken | 0x44F6D0 | (context, damage type, resistance) -> resistance: for a damage type with a second stat (+0x14), a monster defender and an attacker with that stat, the defender's negative modifiers by state (its stat list entries, 0x2F45F0; states with a flag of 0x21B0C0's row) counted again against its base (GetUnitBaseStat at or above 100: the immune rule); else the resistance as it came. One caller (the step, 0x452444), its entry hookable (no RIP-relative operand in its first 11 bytes). Hooked: no enemy immunities (its answer at most 0 for an immunity of a monster not yours) |
 | killself timer | 0x4A1D20 | (game, monster, mod, the monster's unique flag (0x38E870 (monster, 8))): a dead monster (0x34C2C0) nothing; one with state 0x36 (uninterruptable) the same event again at the game's frame + 3; else its owner (0x4A53C0): a player -> the pet removal 0x4FFD30 (game, owner, the monster's id, 1); no owner, or another kind -> the death mode (0x4471E0 (monster, 0, record), 0x4475C0 (game, record, 1)). Hooked: permanent revives |
 | killself's users | 0x55E7E0 / 0x556560 / 0x5710C0 / 0x584480 / 0x5A8750 | each adds mod 21 (0x4995E0) and its event (type 7, the mod its parameter) at the game's frame + a length. Revive (srvdofunc 58, 0x55E7E0): the corpse (0x48FE20) through 0x55A510, 0x55EDB0 and 0x55F8E0, its life (stats 7 and 6) and level, the owner (0x4A5800 (game, pet, owner id, owner type)), the unit to go to (0x5971B0), the AI's think event (type 2) 15 frames on, alignment 2 (0x48E600), the kept target cleared, unit flag 0x80000000 (0x34E190), state 0x60 revive (0x3354C0), then the skill's calc2 (Skills row +0x194, 0x3B5160: 4500 frames) above 0 -> killself and its event, then the pet registration 0x4FEB00 (game, owner, pet, the row's pet type +0x112 (a byte, below 0 none), the petmax calc +0x114). Decoy (srvdofunc 15, 0x556560: calc2 ln12, 250 frames and 125 more a level). The shadows (srvdofunc 49, 0x5710C0): only with a length (Skills row +0x80, auralencalc), none in 3.3. Reanimate As (ItemStatCost item_reanimate, itemevent kill, itemeventfunc 31 0x584320 in the item event table 0x238E5C0, which hands 0x584480 to 0x588550 as a callback): state 0x60, killself at frame + 1500, an owner but no pet registration, so in no pet list; Tomb Reaver and the Faith runeword in 3.3. 0x5A8750 (its callers 0x5A80C0 .. 0x5A85A0): monsters it spawns, killself at a random time. Read |
 | pet lists | 0x4FF3B0 / 0x4FFD30 / 0x5013F0 / 0x501550 / 0x500D80 / 0x501BC0 | a player's data (0x34B240, which asserts on anything else) +0x98: the pet lists, {entries, ...}; an entry 0x20 bytes a pet type (0x5013F0 (bank, lists, type): +0x00 the first node, +0x08 count, +0x0C max, +0x10 a group record; the number of types is the PetType rows', data tables +0x12E0); a node 0x20 bytes: +0x00 flags, +0x04 the unit's id, +0x18 the next. The lookup 0x4FF3B0 (player, id) -> the type whose list has the id, 0 none (types 1 up). The removal 0x4FFD30 (game, owner, id, kill): the lookup first (0 and kill: the unit killed by id, 0x500FB0), the node unlinked, the clients told (0x490D00), the unit killed (kill, 0x500FB0) or its flag 0x80000000 cleared. The registration 0x4FEB00 -> 0x501550 (game, owner, pet, type, max): the other types of its group out, the type's max set (0x501830), then 0x500D80: at the max the list is trimmed from its head (0x501BC0: 0x4FFD30 with kill), the new node appended at its tail, so the oldest gives way. PetType rows (pettype.txt order): 0 none, 1 single, 2 valkyrie, 3 golem, 4 skeleton, 5 skeletonmage, 6 revive, 7 hireable, 8 dopplezon ... 21 binddemon; a Skills row's +0x112 names its pets' (the loader's compiled rows, tests/test_revive.cpp). Called (the lookup): permanent revives |
@@ -1496,6 +1534,67 @@ by a later test). tests/test_requirements.cpp holds the rule, and the compiled I
 txt (the class and body locations; the version, monster class, act and equivalentcharclass) and pettype.txt's row 7
 to "hireable".
 
+Enemies without immunities or affixes (approved 2026-10-06; asked as "add a new cheat to remove enemy immunities, and
+another one to remove all enemy affixes"; Joshua chose an immunity counted as 0 % (over 99 %, which -enemy resistance
+and Conviction would then break, or 75 %), and the champion types kept; the panel's Cheats section under Permanent
+revives, `no_enemy_immunities` / `no_enemy_affixes`, the console's `noimmunities` / `noaffixes`).
+- Immunities. A hit's damage goes through the game's resistance step once per damage type (the record: resistance
+  step; D2RCore wraps it and calls it first): the defender's resistance (the total: base, items, states, curses) goes
+  to 0x44F6D0, its answer to the pierce, which a monster's resistance of 100 or more ignores, and the damage is taken
+  off: none at 100. 0x44F6D0 is hooked: its original runs, and for a monster defender (the step's context says so: no
+  player, no hireling) that is not the local player's, under the switch, an immunity (the total at 100 or more, or the
+  base at 100 or more, which a curse may have brought below) gets an answer of at most 0: what a curse or Conviction
+  took it below 0 stays. The pierce then applies as on any monster (enemies.h resistance). The chill, freeze, poison
+  and burn lengths are damage types of their own, so a cold immune is chilled and frozen, a poison immune poisoned.
+  Nothing of the server's is written. The hover's "Immune to ..." is the client's own sum (the record: client monster
+  resistances): its copy of the resistances (the MonStats row of the difficulty, set at its monster init and class
+  change, plus the resistance affixes its own handlers add), less your Sunder Charm's stat, at 100 or more. The client's
+  mod loop runs right after it has them (its init's last step, the class change, packet 0x57) and is hooked: after it,
+  for a monster that is not yours (not the mercenary flag's, not in the client's pet list as the local player's), each
+  of the six of 100 or more is set to 0 in the client's copy (enemies.h displayed). The first version (2026-10-06) left
+  the hover alone, and natural immunities stayed listed. A monster the client already had when the switch went on keeps
+  its line until the client makes it again (it does as monsters leave and come back into range).
+- Affixes. An affix is a MonUMod row with a unique pick weight, enabled (3.3's thirteen; read through the loader on
+  the server thread the first time a bank is asked, again a second later when it could not be). A monster gets one
+  three ways (the record: monster mods, monster mod test, monster mods run): rolled into its list by the game's roller
+  (0x49E160: a random unique's in its maker 0x499880, a champion's type, a Herald's through D2RCore's ordinal 1164,
+  which adds D2RCore's Herald modifiers from its own roller) or the super unique maker's extra ones, or a terror zone's
+  mod, each roller asking the mod test of every candidate; written in by a maker itself (a super unique's three; a saved
+  monster recreated, 0x505D70 -> 0x49AF30, from its record), then the makers run through one routine; or added one at a
+  time. All three are hooked: for a monster that is not the local player's, under the switch, the test says no to an
+  affix (the rollers then pick another, or nothing), the run takes the affixes out of the monster's list before the
+  makers (the rest kept in order, the tail zeroed: enemies.h strip_affixes), and the add is not run for one. So no affix
+  is in the monster's nine mods, its maker never runs, the client never names it, and the minions a unique's maker makes
+  (0x49EAD0, before its run) copy none. The first version (2026-10-06) hooked the add alone, and every unique kept its
+  affixes.
+- A unique's, a super unique's or a Herald's list (kind 8, 2 or 0x200) is never left empty when it had affixes or a
+  roller was refused one for the monster (a thread-local note from the test, taken at the run): it keeps mod 13 "rage"
+  (enemies.h keep_placeholder). The monster packet sends a
+  monster's kind (unique, super unique, champion, minion, Herald) only when its first mod is not 0 (0x49AAE0, its one
+  test), and the client's mod loop, which names a unique (base mod 1), returns at once for an empty list; every unique
+  the game makes has a mod, the Ancients and Nihlathak in Normal aside (super uniques named by their own monster class,
+  left as they are: nothing was refused them). The second version left such lists empty, and those uniques reached the
+  client as plain monsters while the map, reading the server, still marked them. Mod 13 does nothing on either side:
+  no server maker (checked at bind in the maker table read from the run's `lea r14`), no client handler (the client's
+  table, read from its mod loop's `lea r15`, checked too), no event routine (the records 0x2396210), no affix text
+  (0x1CDD580), no compare against it in any of the 36 routines that read a monster's mods; 3.3's data gives it to no
+  monster (tests/test_enemies.cpp). Mod 1 was looked at and left: a saved unique recreated has its name seed restored
+  between its base mods and its run, and mod 1's maker would draw it again (another name). A champion's type, a unique's base mods (name,
+  life, light, level), the skills' mods and the death effects stay. No skill adds an affix id to a summon (the
+  summons' sumumod 32, 33, 42; SpawnUniqueMod hidedead), so a summon whose owner is set after its mods loses nothing.
+  Monsters made before the switch went on keep theirs; with named enemies on the map an area's monsters are made as
+  it is entered.
+sites.cpp finds the step, the routine, the add, the test, the run and the client's mod loop by signature (each once),
+checks that the step's first call, right after it reads the defender's resistance, is the routine hooked (else the
+immunities' switch is greyed), reads where a monster keeps its mods from the getter the run calls first (else the
+affixes' switch is greyed), and the two maker tables (the server's from the run, the client's from its loop). Without
+the client's loop the hover keeps listing immunities. Checked without the game (scratchpad harness, 2026-10-06: the
+plugin's sites.cpp and mem.cpp over the dump): 129 of 130 sites usable (the unit lookup has its two copies), the six
+once each, the check passing, the mods at data +0x20, the tables 0x2395FE0 and 0x235AE80 with nothing at 13 (Fire
+Enchanted's maker at 9, the resistance maker and the naming handler where the record has them), the hooks' expected
+bytes 99, 94, 65, 91 and 92. tests/test_enemies.cpp holds the rules (the strip, the placeholder, the hover's) and the
+compiled MonUMod rows to monumod.txt's upick columns, mod 13 among them.
+
 Map reveal: on the UI thread (the UI pump), under the switch, when something says the player may stand in an area
 not revealed yet (mapreveal::arm: the loader's LevelChanged with its level, ActChanged, GameJoined, LocalPlayerReady,
 PlayerResurrected; a switch or number changed in the panel or the console), from then on every frame until that area
@@ -1876,7 +1975,8 @@ pass changes nothing.
    automatic affix picker, curse skill step,
    Cursed monster modifier step, vendor payment, client's portal trip, portal use, portal town end, town portal
    cast, wake in town, client's NPC menu, item free, socket contents free, cube products, item notice, enemy test,
-   kept target, AI dispatcher, killself timer, automap's draw of one unit, item requirement test), "the item writer
+   kept target, AI dispatcher, killself timer, automap's draw of one unit, item requirement test, resistance of a hit,
+   client's mod loop, monster mod add, monster mod test, monster mods run), "the item writer
    sends every item's real level to the client", "thread service: UI work accepted", "character: N presets in ...".
    No line begins with "seeds:" any more.
 2. F7 panel; Esc menu shows it automatically; the Character section shows the class and points once in a game.
@@ -2498,3 +2598,45 @@ pass changes nothing.
    no turned into a yes N times for you and M for your mercenary, the gear worked out again K times". A switch greyed
    with a reason, or a warning that begins "sites: the requirement test is not made the way expected" or "sites:
    ... your mercenary's item requirements cannot be ignored", is a routine read wrong: send the log.
+42. No enemy immunities and no enemy affixes (log: "sites: damage: a hit's resistance for one damage type 0x4523E0 /
+   damage: the defender's resistance as a hit takes it 0x44F6D0 / monster mod: one added to a monster 0x4995E0" hits=1
+   each, "sites: enemy immunities a hit's resistance step hands the defender's resistance to the hooked routine
+   first", "enemy immunities: bound (...)", "enemy affixes: bound (...)", "hooks: resistance of a hit hooked at
+   0x44F6D0", "hooks: monster mod add hooked at 0x4995E0", "hooks: monster mod test hooked at 0x4A1E50", "hooks:
+   monster mods run hooked at 0x49E860", "hooks: client's mod loop hooked at 0x1DF980", "sites: enemy affixes a
+   monster's 9 mods at its data +0x20; their makers a pointer a mod at 0x2395FE0; the client's handlers at 0x235AE80",
+   "enemy immunities: the hover lists none for enemies (...)", no warning "enemy affixes: mod 13 has a maker of its
+   own", "settings: ... noimmunities=0 noaffixes=0"). Should the game
+   stop at once after the load with the log's last line one of these, send d2rloader.log.
+   Immunities: Hell, a cold or fire immune pack (the Ancient Tunnels' fire immunes, the Frozen River's cold immunes, a
+   Stone Skin unique for physical). F7, Cheats, tick "No enemy immunities" (under Permanent revives): your spell of
+   that element hurts them fully, as on a monster with no resistance ("enemy immunities: monster class N's resistance
+   R (stat S, base B) counted as 0, not R", the first four); a cold immune is chilled and frozen by cold, a poison
+   immune turns green; with -enemy resistance (Facets, Infinity's Conviction) they take more still. Monsters below 100
+   take what they always took. The hover bar lists no "Immune to ..." for them ("enemy immunities: monster class N's
+   immunities taken off the client's copy (damage D, magic M, fire F, ...; each of 100 or more now 0) - the hover lists
+   none", the first four); Venom Lords in the River of Flame read no fire immunity. Monsters already on screen when you
+   tick it keep their line until they leave and come back. Untick it: immune again at once (the hover again for
+   monsters that come into view). Your mercenary and summons keep their own resistances.
+   Affixes: tick "No enemy affixes", then enter a new area (or Save and Exit and load): unique monsters' names have no
+   line of affixes under them on the hover bar (no Extra Strong, Cold Enchanted, Aura Enchanted ...), they do not
+   teleport, shoot multiple missiles, burn mana, explode in frost or curse you; their minions the same; super uniques
+   too (Bishibosh without Magic Resistant and Fire Enchanted, Rakanishu without Lightning Enchanted and Extra Fast,
+   Pindleskin without Fire Enchanted, and without the extra ones Nightmare and Hell roll); champions are still
+   "Ghostly", "Berserker" ... ("enemy affixes: bank 3 MonUMod: 45 mods; 13 affixes the game rolls for uniques (mods 5
+   6 7 8 9 17 18 25 26 27 28 29 30)", then "enemy affixes: monster class N may take no affix (a roller asked about affix
+   M first)" for
+   random uniques and "enemy affixes: monster class N (kind 0xA) had K affixes written in (mods ...) - taken out
+   before their makers run; mod 13, which does nothing, kept in their place ..." for super uniques, "... was rolled no
+   affix - mod 13, which does nothing, kept in its list ..." for random uniques, the first four of each).
+   Every unique the named-enemies map marks is there when you walk up, with its gold name ("Venom Lord the Cold" style,
+   or a super unique's own), and the hover shows the name with no affix line under it; its minions are with it (as
+   plain monsters: the client is not told they are minions, as their boss's list had no affix to copy).
+   Monsters already made keep theirs. A Herald in a terrorized area: no affixes either. A Necromancer's revives, a
+   Druid's spirits, an Assassin's shadows work as always. Untick it: monsters made from then on have affixes again.
+   The console: `cabbycodes noimmunities on|off`, `noaffixes on|off`, and the status line "enemies: noimmunities=1
+   noaffixes=1; N hits went through an immunity (K monsters' immunities off the hover), R monsters rolled no affix, M
+   affixes taken out or not added (J monsters kept mod 13 so the client still sees what they are)". A switch greyed
+   with a reason, or a warning that
+   begins "sites: a hit's resistance step ..." or "enemy affixes: the MonUMod rows ...", is a routine or a table read
+   wrong: send the log.
