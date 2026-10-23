@@ -14,8 +14,8 @@ loader is the injection point every runtime mod uses).
   Options go in the in-game panel, or nowhere.
 - **No absolute addresses in code.** Every routine is found by byte signature (`src/sites.cpp`) and checked
   with the loader's expected-bytes contract before a hook. RVAs live only in this file, as seeds and record.
-- **All game-code hooks go through D2RLoader** (`InstallInlineHook`) so they are tracked, chained and
-  restored. MinHook is used only for the DXGI Present/ResizeBuffers/CreateSwapChain entry hooks of the overlay
+- **All game-code hooks go through D2RLoader** (`InstallInlineHook`) so they are tracked and restored (not
+  chained: a routine takes one plugin's hook, a second is refused). MinHook is used only for the DXGI Present/ResizeBuffers/CreateSwapChain entry hooks of the overlay
   (the way the other overlay plugins do it).
 - **Game memory is written only from the game's server thread**, inside our hooks (the regen tick, the damage
   hooks). The present thread draws and flips atomics; the watchdog thread saves settings and drives the exit.
@@ -1778,10 +1778,12 @@ thread under Proton), the server's frames (the tick, 25 a second) and the plugin
   dropdown to select the level of severity to print (pick the least critical type to allow and include more
   critical than that)"; the panel's Diagnostics section: the checkbox Write the log and the dropdown beside it,
   Information / Warnings / Errors; `logging` and `log_level` ("info", "warning", "error") in the TOML; `cabbycodes
-  log on|off` and `cabbycodes loglevel info|warning|error`; off and "info" unless the file says otherwise). Off as
-  installed (asked 2026-09-29: "disable the logging by default on a new install"): the shipped TOML, which the
-  loader writes at the plugin's first load, and the default for a file without the key both say false
-  (tests/test_config.cpp holds the shipped file to the defaults); an install that has the key keeps its own. The
+  log on|off` and `cabbycodes loglevel info|warning|error`; on and "info" unless the file says otherwise). On as
+  installed (asked 2026-10-22: "turn logs on by default", after a customer's "not working" report came with no
+  plugin log; it had been off from 2026-09-29, asked as "disable the logging by default on a new install"): the
+  shipped TOML, which the loader writes at the plugin's first load, and the default for a file without the key
+  both say true (tests/test_config.cpp holds the shipped file to the defaults); an install that has the key keeps
+  its own, so the installs of 1.0.0 to 1.2.0, whose shipped file says false, stay off until switched on. The
   level is the least severe kind of line that is written, the more severe are written too; switched off, none is.
   A line that is not written returns before it is put together (2 ns). Written whatever is chosen: what is asked
   for by name, made inside a LogAlways (the console's perf outcome and dropcheck, a DEV command's lines), and what
@@ -2232,9 +2234,9 @@ pass changes nothing.
    `cabbycodes log on|off` and `cabbycodes loglevel info|warning|error` do the same from the console; the status
    says "log: written, level warning (warnings and errors)" or "log: off, level ...".
    A new install: with the game closed, move d2rloader/config/cabbycodes.toml aside and start the game. The new
-   cabbycodes.toml is the shipped one (its comments and all) with logging = false, cabbycodes.log has the one line
-   "CabbyCodes v...: the log is off (logging = false) ...", and "Write the log" is unticked. Close the game and put
-   your own file back.
+   cabbycodes.toml is the shipped one (its comments and all) with logging = true, cabbycodes.log begins
+   "CabbyCodes v... loading: ..." and goes on with the sites and hooks lines, and "Write the log" is ticked. Close
+   the game and put your own file back.
 26. Cannot be cursed (log: "sites: curse skill: step for one unit 0x55A7E0 / Cursed monster modifier: Amplify Damage
    step 0x4A06B0" hits=1 each, "sites: curse apply 0x433D20", "sites: curse steps state at context +0x58; the
    Cursed modifier casts skill 66, a skill's state at row +0xA2", "hooks: curse skill step hooked at 0x55A7E0",

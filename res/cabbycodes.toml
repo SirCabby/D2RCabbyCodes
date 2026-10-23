@@ -237,13 +237,13 @@ show_on_pause = true
 # Key that hides/shows the panel (a virtual-key name or hex code; F7 = 0x76).
 toggle_key = "F7"
 
-# The plugin's log (d2rloader/logs/cabbycodes.log): what it found and hooked
-# as the game started, and what it does as you play. Off as installed: while it
-# is false nothing is written but what you ask for by name in the loader's
-# console (cabbycodes perf, cabbycodes dropcheck). true writes it, which is what
-# to send along when something does not work. The panel's Diagnostics section
-# switches it while you play.
-logging = false
+# The plugin's log (cabbycodes.log in the logs folder beside this config
+# folder): what it found and hooked as the game started, and what it does as
+# you play - what to send along when something does not work. On as installed.
+# While it is false nothing is written but what you ask for by name in the
+# loader's console (cabbycodes perf, cabbycodes dropcheck). The panel's
+# Diagnostics section switches it while you play.
+logging = true
 # The least severe kind of line the log takes; the more severe kinds are
 # written too. "info": everything. "warning": warnings and errors. "error":
 # errors only.

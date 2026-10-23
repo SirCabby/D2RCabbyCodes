@@ -67,17 +67,17 @@ int main() {
   CHECK(!s.passive_mercenary && !s.passive_minions && !s.permanent_revives);
   CHECK(!s.no_enemy_immunities && !s.no_enemy_affixes);
   CHECK(!s.map_named_enemies && !s.map_landmarks && !s.map_exit_names);
-  CHECK(!s.logging && !s.trace);  // the log is written only when the file says so,
-  CHECK(s.log_level == d2rcc::LogLevel::kInfo);  // ... and then all of it
+  CHECK(s.logging && !s.trace);  // the log is written unless the file says otherwise,
+  CHECK(s.log_level == d2rcc::LogLevel::kInfo);  // ... all of it
 
   // What a new install gets: the loader writes res/cabbycodes.toml the first time the plugin loads. Every key is
-  // in it at the default the plugin has for it (written back unchanged), so the log is off there too.
+  // in it at the default the plugin has for it (written back unchanged), so the log is on there too.
   if (std::ifstream f{"res/cabbycodes.toml", std::ios::binary}) {
     const std::string shipped((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     Settings installed;
     CHECK(parse(shipped, &installed) == 66);
     CHECK(rewrite(shipped, Settings{}) == shipped);
-    CHECK(!installed.logging && installed.log_level == d2rcc::LogLevel::kInfo && !installed.trace);
+    CHECK(installed.logging && installed.log_level == d2rcc::LogLevel::kInfo && !installed.trace);
   } else {
     std::printf("res/cabbycodes.toml is not at hand (run from the project's root) - the settings a new install gets "
                 "were not checked\n");
@@ -205,8 +205,9 @@ int main() {
   CHECK(s3.ignore_requirements && !s3.ignore_requirements_mercenary);
   CHECK(!s3.logging && s3.log_level == d2rcc::LogLevel::kWarning);
   Settings on_again;
+  CHECK(parse("[cabbycodes]\nlogging = false\n", &on_again) == 1 && !on_again.logging);
   CHECK(parse("[cabbycodes]\nlogging = true\n", &on_again) == 1 && on_again.logging);
-  CHECK(parse("[cabbycodes]\nlogging = off\n", &on_again) == 0 && !on_again.logging);  // no bool: the default
+  CHECK(parse("[cabbycodes]\nlogging = off\n", &on_again) == 0 && on_again.logging);  // no bool: the default (on)
   // The least severe kind of line the log takes: by name, in any case; a name that is none leaves the default.
   Settings lv;
   CHECK(parse("[cabbycodes]\nlog_level = \"error\"\n", &lv) == 1 && lv.log_level == d2rcc::LogLevel::kError);

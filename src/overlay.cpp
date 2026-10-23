@@ -942,12 +942,13 @@ void draw_panel() {
 
   if (section(kSecDiagnostics, "Diagnostics")) {
     cheat_row(cheats::kLogging, "Write the log",
-              "The plugin's log, d2rloader/logs/cabbycodes.log in the game's folder: what it found and hooked as "
-              "the game started, and what it does as you play. It is what to send along when something does not "
-              "work. Switched off, nothing is written, from now on and in the games to come, but what you ask for "
-              "by name in the loader's console (cabbycodes perf, cabbycodes dropcheck). What happened while it was "
-              "off is not in the log when you switch it on, what the plugin found at the game's start included: "
-              "start the game again for that.");
+              "The plugin's log, cabbycodes.log in d2rloader/logs: in the game's folder, or in the mod's folder "
+              "(mods/<mod>/d2rloader/logs) when D2RMM for D2RLoader installed the plugin. It says what the plugin "
+              "found and hooked as the game started, and what it does as you play, and it is what to send along "
+              "when something does not work. On as installed. Switched off, nothing is written, from now on and in "
+              "the games to come, but what you ask for by name in the loader's console (cabbycodes perf, "
+              "cabbycodes dropcheck). What happened while it was off is not in the log when you switch it on, what "
+              "the plugin found at the game's start included: start the game again for that.");
     {
       const bool on = cheats::enabled(cheats::kLogging);
       static const char* const kLevels[3] = {"Information", "Warnings", "Errors"};

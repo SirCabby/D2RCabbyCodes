@@ -83,7 +83,7 @@ struct Settings {
   bool show_items_unfiltered_was_on = false;
   bool show_on_pause = true;
   int toggle_key = 0x76;  // VK_F7
-  bool logging = false;  // the plugin's log is written (off, as installed: nothing but what is asked for by name)
+  bool logging = true;  // the plugin's log is written (on, as installed; off, nothing but what is asked for by name)
   LogLevel log_level = LogLevel::kInfo;  // ... from this kind of line on: information, warnings or errors
   bool trace = false;
 };

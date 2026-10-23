@@ -140,20 +140,32 @@ Then load a character and press Esc (or F7): the Cabby Codes panel is there. If 
 
 - No `<game>\d2rloader\logs\d2rloader.log`, or one older than your launch: the game was not started through
   D2RLoader - use the shortcut.
-- The log has no `CabbyCodes ... by SirCabby` line: the DLL is not in `<game>\d2rloader\plugins\`.
+- The log has no `CabbyCodes ... by SirCabby` line: the DLL is not in `<game>\d2rloader\plugins\` (with D2RMM for
+  D2RLoader: not imported in its Plugins tab).
 - D2RLoader shows an error before the game opens: see the Visual C++ runtime under Requirements.
+- The line is there and the panel is not: send `cabbycodes.log` along with `d2rloader.log`. It is in the same
+  `logs` folder, or in `<game>\mods\<mod>\d2rloader\logs\` when the line ends in `[mod]` (D2RMM for D2RLoader
+  installed the plugin). If it holds a single line saying the log is off, set `logging = true` in
+  `cabbycodes.toml` (in the `config` folder beside `logs`) and start the game again first. The "ASSERTION - a game
+  check failed" boxes at the end of `d2rloader.log` (`s_StatsPool.IsEmpty()`, `m_allocated == 0` and the like) are
+  the game's own checks, written as a game and then the game itself close: they show up when everything works
+  too, and are not what went wrong.
 
 **Updating**: replace `<game>\d2rloader\plugins\d2rl-cabbycodes.dll` with the new one. Your settings live in
-`<game>\d2rloader\config\cabbycodes.toml` and stay. After a game patch, D2RLoader itself may need an update
-before the game starts.
+`<game>\d2rloader\config\cabbycodes.toml` and stay (with D2RMM for D2RLoader they live in the mod's folder: see
+below). After a game patch, D2RLoader itself may need an update before the game starts.
 
 **Removing**: delete `d2rl-cabbycodes.dll`. To stop using the loader too, start the game from D2RMM or
 Battle.net again; the loader's files sit idle until then.
 
 **D2RMM for D2RLoader**: the [fork](https://www.nexusmods.com/diablo2resurrected/mods/1184) of D2RMM with the
 loader built in can stand in for the shortcut - its Run Game starts `D2RLoader.exe`, it can download the loader
-for you, and its Plugins tab imports `D2RCabbyCodes_vX.Y.Z.zip` directly. The game-folder install above works
-the same under it.
+for you, and its Plugins tab imports `D2RCabbyCodes_vX.Y.Z.zip` directly. A plugin imported there goes into the
+mod's own folder, `<game>\mods\<mod>\d2rloader\` (`<mod>` is usually `D2RMM`; in `d2rloader.log` the plugin's line
+ends in `[mod]`), and so do its settings and presets (`config\cabbycodes.toml`, `config\cabbycodes.presets.txt`)
+and its log (`logs\cabbycodes.log`). The fork empties that folder each time you Install Mods (2.0.1 does), so the
+settings go back to their defaults then and saved presets are gone. The game-folder install above works the same
+under the fork, and keeps them.
 
 ### Linux (Proton)
 
@@ -260,7 +272,7 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
 | `automap_was_open`, `show_items_was_on`, `show_items_unfiltered_was_on` | `false` | What those three remember; the plugin writes them as you play. |
 | `show_on_pause` | `true` | Show the panel whenever the Esc menu is open. |
 | `toggle_key` | `F7` | The key that shows and hides the panel (a key name or hex virtual-key code). |
-| `logging` | `false` | The plugin's log (`d2rloader/logs/cabbycodes.log`) is written. Off as installed: nothing is written then but what you ask for by name in the console (`perf`, `dropcheck`). Switch it on when something does not work: the log is what to send along. The panel's *Diagnostics* section switches it while you play. |
+| `logging` | `true` | The plugin's log (`cabbycodes.log`, see below) is written: what it found and hooked as the game started, and what it does as you play - what to send along when something does not work. `false` writes nothing but what you ask for by name in the console (`perf`, `dropcheck`). The panel's *Diagnostics* section switches it while you play. Earlier releases installed `false` here, and an installed file keeps its own value: set it to `true` there. |
 | `log_level` | `"info"` | The least severe kind of line the log takes; the more severe kinds are written too. `"info"`: everything. `"warning"`: warnings and errors. `"error"`: errors only. The dropdown beside the switch in the panel. |
 | `trace` | `false` | Verbose diagnostics in the loader's log, each line written the instant it is made (the game waits some 5 ms for every line; otherwise its threads hand their lines to a writer thread). For looking into a problem. |
 
@@ -268,8 +280,10 @@ Presets live in `cabbycodes.presets.txt` beside the settings file: one `[[preset
 class, the level it was saved at, the four base attributes and the skill points (`skills = "36:1 39:20"`, skill id
 and points). The panel writes it; it can be edited by hand while the game is closed.
 
-The plugin logs to `<scope>\d2rloader\logs\cabbycodes.log` once `logging` is on. Off (as installed), the file has
-only a line at each start that says so, and what you ask for by name.
+The settings file is `<game>\d2rloader\config\cabbycodes.toml`, and the plugin logs to
+`<game>\d2rloader\logs\cabbycodes.log`; with D2RMM for D2RLoader both are in `<game>\mods\<mod>\d2rloader\` instead
+(see Install). The log is on as installed. With `logging` off, the file has only a line at each start that says
+so, and what you ask for by name.
 
 ## Good to know
 
@@ -289,8 +303,9 @@ only a line at each start that says so, and what you ask for by name.
   the character screen, from a sidecar file next to the save. The save itself is untouched.
 - **Hardcore.** Exit before death works the same in hardcore; a death that never happens is never recorded.
   It is still a cheat plugin, not a guarantee.
-- **Other plugins.** All hooks into the game go through D2RLoader, which tracks and chains them. If another
-  plugin owns a routine CabbyCodes needs, that cheat is greyed out with the reason in the panel.
+- **Other plugins.** All hooks into the game go through D2RLoader, which tracks them but cannot put two plugins'
+  hooks on one routine. If another plugin owns a routine CabbyCodes needs, that cheat is greyed out with the reason
+  in the panel.
 - **Health bars** read what the game's own client knows: a monster's life is a fraction there, so the bars and the
   boss bar show percentages, not points. They need HD graphics (in legacy graphics only the boss bar shows), hide
   under an open inventory or character panel, and hide while the Esc menu is open. A boss joins the boss bar within
