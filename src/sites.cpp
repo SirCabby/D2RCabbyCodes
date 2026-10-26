@@ -657,6 +657,12 @@ const Spec kSpecs[kCount] = {
      "5C 24 40 BA 08 00 00 00 48 89 7C 24 48 48 8B CE 4C 89 74 24 50 4C 89 7C 24 20 E8 ?? ?? ?? ?? 44 0F B6 F0 48 8D "
      "1D ?? ?? ?? ?? BF 04 00 00 00 4C 8D 3D ?? ?? ?? ??",
      0, 0x1DF980},
+    // Through its call of Present: the record in r9 (`mov r9, r8`), the swap chain at its +0 (`mov rcx, [r9]`), the
+    // table's slot 8 (`call [rax+40h]`).
+    {kGamePresent, "renderer: the game's present (pm_dxgi::Instance::Present)",
+     "48 89 5C 24 18 48 89 54 24 10 57 48 83 EC 40 4D 8B C8 48 8B DA 48 8B F9 45 33 C0 44 38 81 80 00 00 00 74 19 45 "
+     "39 41 50 75 13 45 38 41 38 75 0D B8 00 02 00 00 45 38 41 39 44 0F 45 C0 49 8B 09 48 8B 01 41 8B 51 50 FF 50 40",
+     0, 0x109F4C0},
 };
 
 Result g_results[kCount];

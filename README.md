@@ -152,8 +152,9 @@ Then load a character and press Esc (or F7): the Cabby Codes panel is there. If 
   too, and are not what went wrong.
 
 **Updating**: replace `<game>\d2rloader\plugins\d2rl-cabbycodes.dll` with the new one. Your settings live in
-`<game>\d2rloader\config\cabbycodes.toml` and stay (with D2RMM for D2RLoader they live in the mod's folder: see
-below). After a game patch, D2RLoader itself may need an update before the game starts.
+`<game>\d2rloader\config\cabbycodes.toml` and stay. With D2RMM for D2RLoader, import the new zip in its Plugins tab
+and press Install Mods instead (see below). The first line of `cabbycodes.log` names the version that loaded. After
+a game patch, D2RLoader itself may need an update before the game starts.
 
 **Removing**: delete `d2rl-cabbycodes.dll`. To stop using the loader too, start the game from D2RMM or
 Battle.net again; the loader's files sit idle until then.
@@ -163,9 +164,12 @@ loader built in can stand in for the shortcut - its Run Game starts `D2RLoader.e
 for you, and its Plugins tab imports `D2RCabbyCodes_vX.Y.Z.zip` directly. A plugin imported there goes into the
 mod's own folder, `<game>\mods\<mod>\d2rloader\` (`<mod>` is usually `D2RMM`; in `d2rloader.log` the plugin's line
 ends in `[mod]`), and so do its settings and presets (`config\cabbycodes.toml`, `config\cabbycodes.presets.txt`)
-and its log (`logs\cabbycodes.log`). The fork empties that folder each time you Install Mods (2.0.1 does), so the
-settings go back to their defaults then and saved presets are gone. The game-folder install above works the same
-under the fork, and keeps them.
+and its log (`logs\cabbycodes.log`). The fork copies an imported plugin into that folder only when you press
+**Install Mods**: to update, import the new zip in the Plugins tab (it takes the old one's place), then press Install
+Mods, then start the game - the first line of `cabbycodes.log` says which version loaded (`CabbyCodes vX.Y.Z
+loading: ...`). The fork empties that folder each time you Install Mods (2.0.1 does), so the settings go back to their
+defaults then and saved presets are gone. The game-folder install above works the same under the fork, and keeps
+them.
 
 ### Linux (Proton)
 
@@ -192,6 +196,9 @@ arguments (`scripts/d2r-loader.sh` does this with umu-run; adapt its paths), wit
   between games, your home town) and *Diagnostics* (the log switched on or off, and how severe a line must be to be written).
   Hover an option or a (?) mark for details.
 - Settings are written to `cabbycodes.toml` the moment you change them.
+- To switch the log on (installs of 1.2.0 and older have it off in their settings file): tick *Write the log* in
+  the panel's *Diagnostics* section, or set `logging = true` in `cabbycodes.toml`, then start the game again so
+  the log has what the plugin found at start-up.
 - The D2RLoader console (Ctrl+` when enabled in the loader's settings) has a `cabbycodes` command:
   `status`, `panel`, `god|mana|stamina|exit|bars|bossbar|map|ilvl on|off`, `landmarks|enemies|exits on|off`
   (landmarks, named enemies and area names at exits on the map), `exp <multiplier>`, `dmg <multiplier>`,
@@ -306,6 +313,15 @@ so, and what you ask for by name.
 - **Other plugins.** All hooks into the game go through D2RLoader, which tracks them but cannot put two plugins'
   hooks on one routine. If another plugin owns a routine CabbyCodes needs, that cheat is greyed out with the reason
   in the panel.
+- **Overlays.** An overlay that takes the hook the panel is usually drawn from, such as RTSS (MSI Afterburner's
+  on-screen display), no longer hides the panel: it is then drawn from the game's own present routine, with the
+  overlay's display on top. Earlier releases showed no panel with RTSS running.
+- **ReShade** works alongside: install it with its own installer for D2R.exe (it puts a dxgi.dll in the game folder,
+  beside D2RLoader.exe) and start the game through D2RLoader as usual. The game loads ReShade as it does without the
+  plugin, and the panel and the health bars are drawn on top of ReShade's effects (with ReShade older than 6.6 they
+  are drawn under them, so an effect that changes the colors changes the panel's too). Earlier releases kept ReShade
+  from loading. The same holds for any other dxgi.dll in the game folder (Special K, OptiScaler): the game
+  gets it as it would without the plugin.
 - **Health bars** read what the game's own client knows: a monster's life is a fraction there, so the bars and the
   boss bar show percentages, not points. They need HD graphics (in legacy graphics only the boss bar shows), hide
   under an open inventory or character panel, and hide while the Esc menu is open. A boss joins the boss bar within

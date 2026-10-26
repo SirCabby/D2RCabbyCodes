@@ -16,7 +16,8 @@ loader is the injection point every runtime mod uses).
   with the loader's expected-bytes contract before a hook. RVAs live only in this file, as seeds and record.
 - **All game-code hooks go through D2RLoader** (`InstallInlineHook`) so they are tracked and restored (not
   chained: a routine takes one plugin's hook, a second is refused). MinHook is used only for the DXGI Present/ResizeBuffers/CreateSwapChain entry hooks of the overlay
-  (the way the other overlay plugins do it).
+  (the way the other overlay plugins do it); the game's own present routine, which the overlay falls back to, is
+  hooked through the loader like every game routine.
 - **Game memory is written only from the game's server thread**, inside our hooks (the regen tick, the damage
   hooks). The present thread draws and flips atomics; the watchdog thread saves settings and drives the exit.
   The UI thread (the loader's per-frame UI callback) only reads the client's side: the health bars, and a
@@ -189,7 +190,11 @@ loader is the injection point every runtime mod uses).
   ("I'm still seeing immunities listed"): one hook on the client (UI thread), its mod loop (0x1DF980, run at the end of
   its monster init, at its class change and at packet 0x57, after it has set a monster's resistances), after which an
   immunity of a monster that is not yours is 0 in the client's copy (the one write: those six stats of the client's
-  copy, which the server never reads).
+  copy, which the server never reads). Approved 2026-10-23 for the panel past an overlay that takes DXGI's Present
+  (a customer's RTSS; Joshua chose "Hook game's present"): one hook, the game's present routine pm_dxgi::Instance::Present
+  (0x109F4C0), on the thread that presents; it reads the swap chain at its record's +0 and calls nothing of the game's
+  but its original, and while the panel's DXGI Present hooks are passed by (8 frames in a row with no present through
+  them) the panel and the health bars are drawn into that swap chain before the original runs. Nothing written.
 - **Nothing looks at every frame for what an event announces, and no thread of the game writes a log line**
   (Joshua, 2026-09-28: "things that run every frame ... a game hook we could watch instead or event based
   functionality"). A piece of the UI callback waits for what the loader or the game says happened (a lifecycle
@@ -240,8 +245,9 @@ src/hooks_game.*      the loader-tracked hooks: tick, damage (multiplier, pets, 
                       and the kept target's getter (passive pets), the killself timer (permanent revives), the
                       automap's draw of one unit (named enemies on the map), the requirement test (ignore item
                       requirements), a hit's resistance and the client's mod loop (no enemy immunities), a monster's
-                      mod add, the rollers' mod test and the run of a monster's mods' makers (no enemy affixes); the
-                      item writer patch, the rare step's picker calls
+                      mod add, the rollers' mod test and the run of a monster's mods' makers (no enemy affixes), the
+                      game's present routine (the panel's way past an overlay that took DXGI's Present); the item
+                      writer patch, the rare step's picker calls
 src/cheats.*          switches (atomics), Status snapshot, why-not reasons for the panel
 src/movespeed.h       movement speed: the bonus in the player's base velocitypercent, put on top of the game's own
                       again wherever the base is not what the tick wrote (each game's character starts at 100, with
@@ -344,7 +350,10 @@ src/character.*       respec and skill/attribute presets: requests from the pane
 src/presets.*         the presets file format (text in, text out; tests/test_presets.cpp)
 src/config.*          TOML read/rewrite of [cabbycodes]
 src/overlay.*         ImGui panel, window subclass, visibility rule (pause menu / F7)
-src/overlay_d3d12.cpp DX12 host: probe swap chain, MinHook Present, render
+src/overlay_d3d12.cpp DX12 host: probe swap chain, MinHook Present, render; the panel follows the game's frames into
+                      the swap chain that shows them, is drawn from the game's present routine while another hook
+                      leaves the Present hooks out (RTSS), unwraps a dxgi.dll wrapper's proxies (ReShade) to hook
+                      beneath it, and the watchdog's look says why when the panel is up and nothing is drawn
 src/mem.*             guarded reads (VEH), PE sections, pattern search, image snapshot
 src/dev.*             DEV builds: command file poller (d2rloader/logs/cabbycodes.cmd)
 tools/                RE helpers over the runtime dump, a CASC reader for the game's data files, the seeds in the
@@ -407,6 +416,132 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
   (a second before, at a waypoint between acts), so an area's work can start with its first frame.
 - Under Proton the game presents from its UI thread (one thread id for the present hook, the window and the UI
   callback), so whatever the UI callback, the UI message listener or the present hook does is a frame's time.
+- The panel's D3D12 device: the renderer asks the game's swap chain for it (GetDevice with ID3D12Device), which
+  answered under Proton and on Windows 11 25H2 (the laptop, build 26200), and since 2026-10-22 takes its command
+  queue's (D3D12's own GetDevice) when the swap chain gives none. Every way out of the renderer says why, once
+  ("dx12: the panel is not drawn: ...", "dx12: the game's swap chain gives no D3D12 device ..."), and "dx12: panel
+  renderer ready" says whose device it took.
+- Where the game's frames go (2026-10-22). A customer's Windows 11 26H2 (build 26300) had every site and hook in, the
+  game's swap chain found at the main menu ("the game presents through swap chain ... seen as it was made") and F7
+  toggling the panel in a game, with 1.2.0 and again with 1.2.1, and no "dx12:" line at all: with 1.2.1, whose every
+  renderer exit logs, that means no frame of that swap chain reached the renderer after the menu. The game presents
+  in one place (its Prism renderer's pm_dxgi::Instance::Present, 0x109F4C0: `call [rax+0x40]`, vtable slot 8, flags
+  0 or 0x200 allow tearing), so the frames left the hook's view between the game and DXGI. The likeliest cause is
+  frame generation in the display driver: NVIDIA Smooth Motion (nvpresent64.dll, Detours hooks) is reported to keep
+  the game's swap chain on a window nobody sees and present the game's frames and its own through a second swap
+  chain, from another thread (Dalamud issue 2190, BG3SE issue 607); overlays and OptiScaler's frame generation change
+  the path the same way. Not confirmed for that customer: 1.2.1's log had no counts. Since then the hooks count what
+  comes through them, and the panel follows the frames: when the panel's swap chain has not presented through the
+  hook for a second, or presents to another window than the game's, and another swap chain presents to the game's
+  window (or to a visible window of the process exactly as large) on a known queue, the renderer is made again on
+  that one ("overlay: the game's frames now reach the screen through swap chain ... - the panel follows them"). A
+  swap chain made where the panel's was (the game's made again, same pointer) starts the panel over ("the game made
+  its swap chain again, where the last one was"); without that check a harness run drew with the old renderer into
+  the new one ("the next back buffer (2) is past the 2 it has"). The back buffer is taken for each frame alone (a
+  reference kept would make a ResizeBuffers fail that the hook does not see), and a changed format or buffer count
+  makes the renderer again instead of stopping the panel. The toggle key's line says what came through the hooks
+  ("panel opened by the toggle key (the Present hooks saw N frames, the panel's swap chain's last X ms ago)"), the
+  log names the GPU once ("overlay: the game renders on ..."), and when the panel is up and nothing has been drawn
+  for a second the watchdog writes one account (warnings): the counts and threads, whether the Present and Present1
+  entries are still as the hook left them and where their jumps lead, what the panel's swap chain's own vtable
+  holds, and the modules from outside Windows' own folders (the driver store's, overlays'). Checked without the game
+  (scratchpad harness hov/, wine's D3D12 on the RTX 3090): discovery, frames drawn, a resize and a format change with
+  the panel up, a second window's swap chain refused, the game's swap chain made again at the same address and at
+  another, frames from another thread, the account.
+- Where the game's frames go, next (2026-10-23). The customer's next log was 1.2.1 again ("CabbyCodes v1.2.1 loading:
+  ..., scope mod"), so 1.2.2 never ran: the D2RMM fork keeps a plugin imported in its Plugins tab in its own folder
+  (`<D2RMM>\d2rloader\<the zip's top folder>`; an import of the same name takes the old one's place) and copies it
+  into `<game>\mods\<mod>\d2rloader` only when Install Mods runs (applyManagedD2RLoaderPackages, with the mods'
+  files, after that folder is emptied), so an import alone changes nothing in the game. The READMEs say so now.
+  What the next build adds:
+  - where dxgi.dll and d3d12.dll come from ("overlay: dxgi.dll ... (C:\WINDOWS\SYSTEM32\dxgi.dll), d3d12.dll ...
+    (...)"; when the game has loaded none yet the plugin loads dxgi.dll by name, as the game does, and System32's
+    d3d12.dll by full path: see ReShade below), and the runtime the game's
+    command queue belongs to ("overlay: the game's command queue is the D3D12 runtime's in ...\D3D12Core.dll").
+    The game has a second way to present. pm_dx12::CmdQueue::Present (0x10FACA0, vtable 0x1E520F8) presents
+    through ID3D12CommandQueueDownlevel, without DXGI, when its queue answers that interface (queue +0xB8, asked
+    for as the queue is made, 0x10DCBB1, IID 38A8C5EF-7CCB-4E81-914F-A6E9D072C494; the answer is not checked).
+    pm_dx12::Device::InitSwapChain (0x10FA0C0) then makes no DXGI swap chain (the device's +0x70,
+    ID3D12DeviceDownlevel). Only D3D12 on Windows 7's runtime answers those. The game folder ships it: d3d12.dll
+    "Direct3D 12 Runtime for Windows 7" 10.0.17763.1000, with dxilconv7.dll. The game's loader 0x10F8540 runs
+    LoadLibraryW of a configured path, else of "d3d12.dll", and only when that fails LoadLibraryExW("d3d12.dll",
+    LOAD_LIBRARY_SEARCH_SYSTEM32). Windows 10's and 11's System32 d3d12.dll and D3D12Core.dll have neither
+    interface. A queue that answers it is a warning ("overlay: the game's command queue is D3D12 on Windows 7's ...
+    past the panel's hooks"). The customer's game made a DXGI swap chain and presented through it at the menu, so
+    it was not on that path;
+  - (dropped 2026-10-23, never released) a hook made again over another hooker's jump with a MinHook routine of
+    ours (MH_RecreateHook), while the panel was up and no frame came through. Against RTSS it could not hold (below),
+    and in front of a hooker that does keep the panel's jump it would have looped (the old relay still led to the
+    hook, whose new trampoline led back to that hooker).
+- Where the game's frames went: RTSS (2026-10-23, the same customer's 1.2.2 log, which has the account above). RTSS
+  (RivaTuner Statistics Server, MSI Afterburner's on-screen display; rtsshooks64.dll among the modules) had Present's
+  entry: "Present's entry was written over since: it jumps to 0x7FFA28FC0000, then RTSSHooks64.dll+0x72F20 (not the
+  panel's hook)", Present1's was the panel's still, the swap chain's table untouched, and the Present hooks saw 1 frame
+  in all (the menu's first). RTSS's author has said that RTSS puts its own jump back inside its hook when it finds it
+  moved, which takes a hook put over it out of the chain (OBS forum, "Detours based injection in 27.1.0 and
+  compatibility with third party hooks"); RTSS has a compatibility option with Microsoft Detours that lets both stay.
+  So the panel never showed for anyone running RTSS. The game hands every frame to DXGI through one routine of its
+  renderer, pm_dxgi::Instance::Present (0x109F4C0), whose `call [rax+40h]` is IDXGISwapChain::Present: it is hooked
+  through the loader (approved 2026-10-23), and when it has handed on 8 frames in a row with no present at all
+  through the panel's Present hooks, the panel and the health bars are drawn there, before the game's call of
+  Present (into the system's swap chain a wrapper's wraps, when ReShade's says), until a present comes through the
+  hooks again; a frame the routine drew into that comes through a hook after all is not drawn twice ("overlay: the
+  game's frames go to DXGI past the panel's Present hooks (8 in a row; Present's entry ...) - the panel is drawn from
+  the game's present routine", and "presents come through the panel's Present hooks again - they draw the panel").
+  Where the hooks are not passed by they keep drawing (beneath ReShade, after its effects). The toggle key's line and
+  the account give the routine's counts. Checked: the site over the dump (once, 74 bytes, 130 of 131 sites usable).
+  The overlay harness with a stand-in for RTSS (scratchpad rt/: its own MinHook copy, its names renamed, hooks
+  Present before the overlay installs and puts its jump back when it finds it moved) is built; it was not run, as the
+  test machine's GPU had failed (an Xid 51 from gamescope at 20:55 that day, "Reset required" for every new Vulkan
+  device until a reboot).
+- ReShade and other dxgi.dll wrappers (2026-10-23; reported as "someone messaged me saying that they can't use this
+  mod in combination with ReShade, which adds a dxgi.dll file"). The game asks for dxgi.dll by name
+  (pm_dxgi::Instance::Init 0x109E230: LoadLibraryW(L"dxgi.dll"), then CreateDXGIFactory1 / CreateDXGIFactory2 from
+  that handle), so the game folder comes first (the process is D2RLoader.exe, which stands there): a dxgi.dll put
+  there by ReShade's installer is the game's DXGI. Until 2026-10-23 (1.2.2 and before) the overlay loaded System32's
+  dxgi.dll by full path at its install, 0.7 s before the game asks, and Windows hands out a DLL already loaded under
+  the name asked for, whatever folder it came from: the game was handed System32's, and ReShade never loaded (D2RCore
+  loads no dxgi.dll or d3d12.dll of its own). Now the overlay loads dxgi.dll by name, as the game does (System32's
+  only when that one does not load); d3d12.dll stays System32's by full path (the Windows 7 runtime the game folder
+  ships, see above).
+  What ReShade (as dxgi.dll) does, read in its source (github.com/crosire/reshade) and seen in its log:
+  - it function-hooks System32's d3d12.dll exports once that is loaded: D3D12CreateDevice hands out its D3D12Device
+    proxy, whose queues are D3D12CommandQueue proxies (a device is one per adapter: a proxy is found again by the
+    private data it sets on the real device);
+  - its CreateDXGIFactory1 / 2 hand out a DXGIFactory proxy (from 6.5; before, and with the Ubisoft overlay loaded,
+    vtable hooks on the real factory's CreateSwapChain* entries), whose CreateSwapChainForHwnd hands the real one the
+    queue its proxy wraps and wraps the swap chain made in its DXGISwapChain. That one's Present runs ReShade's effects
+    and overlay, then calls the system's Present. A swap chain made with a real queue is not wrapped ("Skipping swap
+    chain because it was created without a proxy Direct3D device");
+  - from 6.6.0 its proxies answer QueryInterface for IID_UnwrappedObject {7F2C9A11-3B4E-4D6A-812F-5E9CD37A1B42} with the
+    object they wrap (a reference added); unknown interfaces otherwise go to the wrapped object.
+  The probe asks its factory and device for IID_UnwrappedObject. When both answer, the probe is made of the system's
+  objects (the queue made on the real device, the swap chain by the real factory: ReShade sees none of it), the hooks
+  go on the system's swap chain and factory classes beneath ReShade, and the game's swap chain is seen being made as
+  the system's one (ReShade's proxy calls the real CreateSwapChainForHwnd with the real queue) and presents through
+  the real Present after ReShade's work: the panel is drawn on top of ReShade's effects, with the real device and
+  queue. With ReShade before 6.6 the probe is ReShade's (it makes a runtime for the probe window and lets it go at
+  once), the hooks go on ReShade's DXGISwapChain and DXGIFactory methods, and the panel is drawn through ReShade's
+  proxies before ReShade's work (its effects go over it). A swap chain seen being made by hooks in front of a
+  wrapper's also has its unwrapped pair kept (remember). The log says which ("overlay: the game's dxgi.dll is not the
+  system's but ReShade 6.8.0 - ...", then "ReShade 6.8.0 hands out the objects it wraps - the panel's hooks are on the
+  system's swap chain beneath it, ..." or "the swap chain class hooked is ReShade 6.5.1's own - the panel is drawn
+  before its work on each frame ..."). Wine (Proton) differs from Windows in one thing that matters: its loader keeps
+  a one-entry cache of the module looked at last (ntdll loader.c, cached_modref: set by every lookup by handle, base
+  name, full name or file id), which a lookup by name asks before its hash table. After ReShade had loaded System32's
+  dxgi.dll behind it during the probe (at its first export call) and the log had looked at that one, the harness's
+  "game" asking for "dxgi.dll" got System32's, with ReShade's device and queue proxies from its d3d12 hooks, and wine's
+  DXGI handed a proxy queue read address 0. The overlay looks at the game's own dxgi.dll last (a GetProcAddress), so
+  that the cache holds it, and when "dxgi.dll" already answers with the system's as it installs (the game made a
+  factory first), it takes ReShade's module (the one that exports ReShadeVersion) when that is a dxgi.dll; Windows
+  walks its hash table in load order and gives the first loaded either way.
+  Checked under wine 11.19 (scratchpad hov/rs_harness.cpp: the overlay installs first, as the worker does, or after
+  the game loaded dxgi.dll, or after it made a factory with Wine's cache left on the system's dxgi.dll; then the
+  game's factory, device, queue and swap chain through ReShade's DLL, 1.5 s of presents with the panel up, a resize,
+  the panel down and up again) with ReShade 6.8.0, 6.6.2, 6.5.1 and 6.4.1 (the official signed builds, from their
+  setup programs' zip): ReShade loaded, its runtime made on the game's swap chain, the panel drawn on every frame in
+  every case; the old way (System32's dxgi.dll first) kept ReShade out. The no-wrapper harness (hov/harness.cpp) as
+  before.
 - Lifecycle `LocalPlayerReady.playerId` is the unit id (1 offline). The global server unit table does not
   list the player; the server unit is recognised by id in the hooks (every player passes the regen tick).
 - Character badges ("soft modded", "plugins") come from the loader's `<char>.d2rl` sidecar, not the save.
@@ -691,6 +826,7 @@ Launch: `scripts/d2r-loader.sh` (umu-run, Battle.net prefix, Proton verb `run`),
 | client pet list | 0x13ABC0 / 0x2A4DC10 | (player, pet type, any) -> the id of the player's pet of that type, -1 none: nodes from the head 0x2A4DC10 (+0x04 pet type, +0x08 the pet's id, +0x0C its owner's id, +0x20 nonzero for a gone one, which counts only with `any`, +0x30 the next). The client's mercenary check 0x159D20 asks it with type 7 (pettype.txt "hireable") and the local player, then the client's unit of that id (0x9A5D0, a monster) and the requirement test. Read: ignore item requirements |
 | server pet of a type | 0x4FF1A0 | (game, player, pet type, any) -> the unit (0x48FE80, a monster) of the first node of the player's list of that type (player data +0x98, 0x20 bytes a type) that is not gone (node flag bit 0) unless `any`. The mercenary's gear handlers 0x4C0E20 / 0x4C3DC0 ask it with 7 and 0. Called: ignore item requirements (the mercenary's items worked out again) |
 | items worked out again | 0x470C90 / 0x470CA0 / 0x475760 | 0x470C90 (game, unit, a3, a4): `mov r8d, r9d` and a jump to 0x470CA0 (game, unit, tell the client): for a player or a unit with the mercenary flag, the inventory's charms that D2RCore's IsCharmUsable and 0x475760 pass enabled; every worn item (body locations 1..10) disabled (item flag 0x4000, its stats off, 0x475020), then each that is not broken and passes 0x475760 enabled again (0x475090), over and over until nothing changes (so one item's strength counts for another's requirement); then the item skills. 0x475760 (unit, item) -> the requirement test, then a pairing test (0x371E90). Run by a game's load (0x52E910, the load D2RCore runs, and 0x408EA0, a client's join), an attribute point spent (0x4B3C70), the respec, a purchase, a quest reward, and by the inventory moves (0x471500, 0x471E90, 0x472590) and the identify routine through 0x470CA0. Called (0x470C90): infinite cube ingredients, ignore item requirements |
+| the game's present (DXGI) | 0x109F4C0 / 0x10FACA0 | pm_dxgi::Instance::Present (instance, result out, record) -> result: the record (r8, kept in r9) +0 the IDXGISwapChain, +0x50 the sync interval, +0x38 / +0x39 bytes that with the instance's +0x80 (tearing supported) and a sync interval of 0 give flags 0x200 (allow tearing), else 0; `call [rax+40h]`, the table's slot 8 (Present); the result {u16 code, i32 hr} 0 for a success, else a code by the hr (0x402 out of memory, 0x403 the device lost: removed, hung, reset, its driver failed, or an invalid call; 0x401 the rest) and 0x107DDD0. Three callers: pm_dx12::CmdQueue::Present 0x10FAE51 (the record at its +0x10) and the DX11 renderer's 0x10AECAB / 0x10C6709. Hooked (through the loader): the panel drawn there while the DXGI Present hooks are passed by (RTSS) |
 Client map (UI thread): a dynamic path's room at +0x20 is an ActiveRoom; ActiveRoom +0x18 the DrlgRoom (0x192B20),
 DrlgRoom +0x10 near rooms (+0x18 count), +0x48 next in its level, +0x50 flags, +0x58 ActiveRoom, +0x60/+0x64/+0x68/+0x6C
 tile x/y/w/h, +0x74 type, +0x90 level; Level +0x10 first room, +0x1C8 the DRLG, +0x1F8 id (0x360FC0); DRLG +0x830
@@ -1982,6 +2118,21 @@ pass changes nothing.
    sends every item's real level to the client", "thread service: UI work accepted", "character: N presets in ...".
    No line begins with "seeds:" any more.
 2. F7 panel; Esc menu shows it automatically; the Character section shows the class and points once in a game.
+   The first time it shows, the log has "dx12: panel renderer ready (device ..., the swap chain's, queue ...)" (on
+   a Windows that gives no device from the swap chain: a warning "the game's swap chain gives no D3D12 device ...
+   the panel takes its command queue's", then "..., the queue's, ..."); a panel that does not show says why in a
+   "dx12:" warning or error. The log names the GPU ("overlay: the game renders on NVIDIA GeForce RTX ... (vendor
+   0x10DE, ...)"), and F7's line ends "(the Present hooks saw N frames, the panel's swap chain's last X ms ago)",
+   X a few ms. A panel that is up and not drawn for a second gets one account ("overlay: the panel is up and nothing
+   has been drawn for ..." and the lines after it): send it. With frame generation in the driver (NVIDIA Smooth
+   Motion) or an overlay that presents the game's frames itself, "overlay: the game's frames now reach the screen
+   through swap chain ... - the panel follows them" and the panel shows; with an overlay whose hook took Present's
+   place without leading on to the panel's (RTSS), "overlay: the game's frames go to DXGI past the panel's Present
+   hooks (8 in a row; Present's entry ...) - the panel is drawn from the game's present routine" and the panel shows
+   (item 44). At the start: "overlay: dxgi.dll ...
+   (C:\WINDOWS\SYSTEM32\dxgi.dll), d3d12.dll ... (C:\WINDOWS\SYSTEM32\d3d12.dll)", and as the game's frames are
+   first seen "overlay: the game's command queue is the D3D12 runtime's in C:\WINDOWS\SYSTEM32\D3D12Core.dll" (no
+   warning that it is Windows 7's).
 3. God mode in a pack; infinite mana with a costly skill (orb must not move); speed 0/100/300;
    exp: kill at 1x then 10x and at 1000x and compare the Status note ("Experience: N x 1000.00 = M"); with a
    mercenary along its gains are scaled too ("Experience: your mercenary's N x ...") and its level chases yours (a
@@ -2642,3 +2793,27 @@ pass changes nothing.
    with a reason, or a warning that
    begins "sites: a hit's resistance step ..." or "enemy affixes: the MonUMod rows ...", is a routine or a table read
    wrong: send the log.
+43. ReShade (log: "overlay: dxgi.dll ... (<game>\dxgi.dll), d3d12.dll ... (C:\WINDOWS\SYSTEM32\d3d12.dll)", "overlay: the
+   game's dxgi.dll is not the system's but ReShade X.Y.Z - it stands between the game and DXGI", "overlay: ReShade X.Y.Z
+   hands out the objects it wraps - the panel's hooks are on the system's swap chain beneath it, and the panel is drawn
+   after its work on each frame" (ReShade 6.6 and later; before: "overlay: the swap chain class hooked is ReShade X.Y.Z's
+   own - the panel is drawn before its work on each frame ..."), "overlay: a D3D12 swap chain was made
+   (CreateSwapChainForHwnd): ...", "overlay: the game presents through swap chain ... seen as it was made", "dx12: panel
+   renderer ready"). ReShade installed with its own installer for D2R.exe (DirectX 10/11/12: dxgi.dll and ReShade.ini
+   in the game folder, beside D2RLoader.exe); under Proton the launch needs WINEDLLOVERRIDES="dxgi=n,b". Start through
+   D2RLoader: ReShade's banner at the top as the game starts, Home opens its overlay and its effects show. F7 shows the
+   panel, and the health bars come in a fight, both on top of ReShade's effects (6.6 and later: an effect that changes
+   the colours, a LUT or a sharpen, leaves the panel's alone); ReShade.log beside dxgi.dll has "Redirecting
+   IDXGIFactory2::CreateSwapChainForHwnd" for the game's window and "Recreated runtime environment". Resize the window
+   or switch fullscreen: both go on. Without ReShade (dxgi.dll taken out of the game folder): as before, "overlay:
+   dxgi.dll ... (C:\WINDOWS\SYSTEM32\dxgi.dll)" and no ReShade line.
+44. RTSS and other overlays that take DXGI's Present (log: "sites: renderer: the game's present
+   (pm_dxgi::Instance::Present) 0x109F4C0 hits=1", "hooks: the game's present routine hooked at 0x109F4C0"). With RTSS
+   (MSI Afterburner's on-screen display) running and its overlay on for D2RLoader.exe: start the game, load a
+   character, press Esc or F7: the panel shows, with RTSS's on-screen display over it, and the health bars come in a
+   fight. The log has, once at the menu, "overlay: the game's frames go to DXGI past the panel's Present hooks (8 in a
+   row; Present's entry ...: it jumps to ..., then RTSSHooks64.dll+... (not the panel's hook)) - the panel is drawn
+   from the game's present routine", and F7's line ends "...; the game's present routine N, M of them drawn there)".
+   Close RTSS (or give D2RLoader.exe "Application detection level: None" in it) while playing: "overlay: presents come
+   through the panel's Present hooks again - they draw the panel", and the panel stays. Without RTSS no such line
+   (the Present hooks draw), and with ReShade 6.6 or later neither (item 43).

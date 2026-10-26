@@ -10,7 +10,9 @@
 // the swap chain class's Present and ResizeBuffers functions (MinHook, the way
 // the other D2RLoader overlay plugins do, so the hooks chain with theirs),
 // captures the game's command queue as its swap chain is made, and draws the
-// panel into the back buffer about to be shown, on the thread that presents.
+// panel into the back buffer about to be shown, on the thread that presents -
+// the game's swap chain's, or the one its frames are seen to go through instead
+// (driver frame generation presents them through a swap chain of its own).
 namespace d2rcc::overlay {
 
 bool install();    // worker thread, once: the D3D12 hooks (before the game makes its swap chain)
@@ -35,6 +37,7 @@ struct ImGuiLock {
 };
 
 bool visible();  // the panel was drawn in the last frame
+void watch(ULONGLONG now);  // the watchdog, once a second: says in the log why, when the panel is up and not drawn
 void set_forced(bool on);  // show the panel whatever the pause menu does (the toggle key, the console)
 void set_pause_open(bool on);  // plugin.cpp: the game's pause menu opened or closed (from its UI messages)
 bool pause_open();             // ... and whether it is up now (any thread)
@@ -49,6 +52,11 @@ namespace d3d {  // overlay_d3d12.cpp
 bool install();
 void uninstall();
 bool presenting();  // the game's swap chain has presented through the hook
+void presents_note(char* out, size_t n);  // " (the Present hooks saw ...)": for the toggle key's line
+void watch(ULONGLONG now, bool up);       // once a second; `up`: the panel is to be drawn
+// The game's present routine (hooks_game.cpp), on the thread that presents, before it hands the frame in its swap
+// chain to Present: the panel is drawn here while the Present hooks are passed by.
+void game_present_begin(void* swap_chain);
 }  // namespace d3d
 
 }  // namespace d2rcc::overlay

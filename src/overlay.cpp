@@ -135,12 +135,16 @@ int toggle_key() { return settings().toggle_key; }
 bool pause_menu_open() { return g_pause_open != 0; }
 
 void toggle(const char* how) {
+  // A panel put up says whether the game's frames come through the hooks it is drawn from.
+  char note[192] = "";
   if (pause_menu_open() && settings().show_on_pause) {
     InterlockedExchange(&g_user_hidden, g_user_hidden ? 0 : 1);
-    logf("panel %s by the toggle key%s", g_user_hidden ? "hidden" : "shown", how);
+    if (!g_user_hidden) d3d::presents_note(note, sizeof(note));
+    logf("panel %s by the toggle key%s%s", g_user_hidden ? "hidden" : "shown", how, note);
   } else {
     InterlockedExchange(&g_forced, g_forced ? 0 : 1);
-    logf("panel %s by the toggle key%s", g_forced ? "opened" : "closed", how);
+    if (g_forced) d3d::presents_note(note, sizeof(note));
+    logf("panel %s by the toggle key%s%s", g_forced ? "opened" : "closed", how, note);
   }
 }
 
@@ -451,6 +455,11 @@ bool hud_wanted() { return g_context_ready && !pause_menu_open() && healthbars::
 void draw_hud() { healthbars::draw(g_hud_font); }
 
 bool visible() { return g_visible != 0; }
+void watch(ULONGLONG now) {
+  // Whether the next frame would draw the panel, without the rule's side effects (wants_draw).
+  const bool paused = pause_menu_open() && settings().show_on_pause;
+  d3d::watch(now, g_context_ready && (paused ? !g_user_hidden : g_forced != 0));
+}
 void set_forced(bool on) { InterlockedExchange(&g_forced, on ? 1 : 0); }
 void set_pause_open(bool on) { InterlockedExchange(&g_pause_open, on ? 1 : 0); }
 bool pause_open() { return g_pause_open != 0; }

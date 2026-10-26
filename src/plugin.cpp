@@ -295,7 +295,7 @@ void __cdecl ui_pump(const D2RL::PluginContext* ctx, void*) noexcept {
   }
 }
 
-// --- the watchdog thread: saves, the UI probe, leaving the game --------------------------------
+// --- the watchdog thread: saves, the UI probe, leaving the game, the panel's account -----------
 // The plugin's own thread, so nothing waits on the loader's queues. Nothing here touches game memory. It
 // sleeps until it is woken (watchdog::wake: a setting to write, a preset, a request to leave the game) and
 // looks a second later at the latest, should a wake ever be missed. While it waits for something by the
@@ -327,6 +327,7 @@ DWORD WINAPI watchdog_thread(void*) {
       begin_exit();
     }
     exit_watch(now);
+    overlay::watch(now);
     const bool by_the_clock = (!g_ui_ready && g_threads) || g_exit_phase != 0 || remember::save_waits() ||
                               perf::sampling();
     if (g_wake) WaitForSingleObject(g_wake, by_the_clock ? kWatchdogBusyMs : kWatchdogIdleMs);

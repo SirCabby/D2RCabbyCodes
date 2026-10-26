@@ -32,6 +32,7 @@
 #include "roomfill.h"
 #include "movespeed.h"
 #include "npcservice.h"
+#include "overlay.h"
 #include "passive.h"
 #include "requirements.h"
 #include "revive.h"
@@ -1167,6 +1168,18 @@ bool install_one(sites::Id id, Fn detour, Fn* original, const char* what) {
   return true;
 }
 
+// --- the game's present: the panel's way past a hook that took DXGI's Present ---------------------------
+// pm_dxgi::Instance::Present (instance, result out, record) -> result: the record's +0 the swap chain the frame goes
+// to (the signature holds the `mov rcx, [r9]` that reads it). The overlay draws the panel here while another hook
+// leaves its Present hook out (overlay_d3d12.cpp); nothing else is done, and only the original is called.
+using GamePresentFn = void* (*)(void*, void*, void*);
+GamePresentFn g_orig_game_present = nullptr;
+
+void* hk_game_present(void* instance, void* result, void* record) {
+  overlay::d3d::game_present_begin(reinterpret_cast<void*>(mem::read_ptr(reinterpret_cast<uintptr_t>(record))));
+  return g_orig_game_present(instance, result, record);
+}
+
 }  // namespace
 }  // namespace d2rcc::hooks
 
@@ -1273,6 +1286,8 @@ extern "C" __attribute__((naked)) void d2rcc_protected_stat_thunk() noexcept {
 namespace d2rcc::hooks {
 
 bool install() {
+  // The panel's, whatever else binds: the game's present routine, for when another hook takes DXGI's Present.
+  install_one(sites::kGamePresent, &hk_game_present, &g_orig_game_present, "the game's present routine");
   if (!game::bound()) {
     for (int k = 0; k < cheats::kCount; ++k) cheats::set_why_not(static_cast<cheats::Kind>(k), "stat helpers not found");
     return false;

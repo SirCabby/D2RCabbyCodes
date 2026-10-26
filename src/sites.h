@@ -265,6 +265,12 @@ enum Id : int {
                          // (naming, light, the resistance affixes), nothing for an empty list; run at the end of the
                          // client's monster init, at its class change and at packet 0x57, after its resistances are
                          // set (hooked: no enemy immunities on the hover)
+  // The panel where DXGI's Present is out of its reach. The game hands every frame to DXGI through one routine of its
+  // renderer, on the thread that presents.
+  kGamePresent,          // pm_dxgi::Instance::Present (instance, result out, record): the record's +0 the swap chain,
+                         // +0x50 the sync interval; IDXGISwapChain::Present by its table (slot 8). Callers: the DX12
+                         // renderer's pm_dx12::CmdQueue::Present and the DX11 renderer's two (hooked: the panel drawn
+                         // there when another hook took Present's entry and left the panel's out)
   kCount
 };
 
